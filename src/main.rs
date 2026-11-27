@@ -92,6 +92,8 @@ enum UserEvent {
     HomeTiles(u64, Vec<config::Tile>),
     Fullscreen(u64, bool),
     ClosePopup,
+    OpenTabWith(String, bool),
+    SearchTab(String),
 }
 
 /// Commandes envoyées par l'interface (JSON). Tout champ inattendu est rejeté.
@@ -590,7 +592,9 @@ fn secret() -> String {
 /// Script injecté au début de chaque document d'un onglet.
 /// Il capture la fonction native d'envoi AVANT que le site ne s'exécute : le site ne peut
 /// ni l'intercepter ni connaître la clé, donc ne peut pas se faire passer pour Ferrox.
-fn content_init(token: &str, blocker: Option<&str>, dnt: bool) -> String {
+const MENU_SCRIPT: &str = include_str!("../ui/menu.js");
+
+fn content_init(token: &str, blocker: Option<&str>, dnt: bool, accent: &str) -> String {
     format!(
         r#"(() => {{
   'use strict';
@@ -608,8 +612,11 @@ fn content_init(token: &str, blocker: Option<&str>, dnt: bool) -> String {
   const __fxSend = (m) => {{ try {{ if (__post) __post(__T + '|' + m); }} catch (_) {{}} }};
   {blocker}
   {privacy}
+  {menu}
 }})();"#,
         blocker = blocker.unwrap_or(""),
+        // couleur déjà validée (#rrggbb) par les paramètres
+        menu = MENU_SCRIPT.replace("__ACCENT__", accent),
         privacy = PRIVACY_SCRIPT.replace("__DNT__", if dnt { "true" } else { "false" }),
     )
 }
@@ -798,6 +805,7 @@ impl App {
             &token,
             adblock.then(|| sh.script.as_str()),
             self.settings.send_dnt,
+            &self.settings.accent,
         ));
 
         let nav = {
@@ -906,6 +914,20 @@ impl App {
                         }
                     } else if b == "x" {
                         let _ = p.send_event(UserEvent::ClosePopup);
+                    } else if let Some(u) = b.strip_prefix("op:") {
+                        // menu clic droit : « ouvrir dans un onglet privé »
+                        if (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= 4096 {
+                            let _ = p.send_event(UserEvent::OpenTabWith(u.to_string(), true));
+                        }
+                    } else if let Some(u) = b.strip_prefix("o:") {
+                        if (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= 4096 {
+                            let _ = p.send_event(UserEvent::OpenTab(u.to_string()));
+                        }
+                    } else if let Some(q) = b.strip_prefix("s:") {
+                        let q: String = q.chars().filter(|c| !c.is_control()).take(400).collect();
+                        if !q.trim().is_empty() {
+                            let _ = p.send_event(UserEvent::SearchTab(q));
+                        }
                     }
                 }
             })
@@ -1321,6 +1343,12 @@ impl App {
                 }
             }
             UserEvent::ClosePopup => self.close_popup(),
+            UserEvent::OpenTabWith(url, private) => self.new_tab(url, private),
+            UserEvent::SearchTab(q) => {
+                let url = self.settings.search_url.replace("{}", &percent_encode(q.trim()));
+                let private = self.active_idx().is_some_and(|i| self.tabs[i].private);
+                self.new_tab(url, private);
+            }
             UserEvent::NetBlocked(id) => {
                 self.blocked_total += 1;
                 if let Some(i) = self.idx(id) {
