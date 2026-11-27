@@ -157,11 +157,44 @@ fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Option<Vec<u8>> {
     r.body_mut().with_config().limit(limit).read_to_vec().ok()
 }
 
+/// Pages à essayer : l'adresse du raccourci, la racine du site, puis le domaine principal
+/// (ex. `store.epicgames.com` → `www.epicgames.com`, `epicgames.com`).
+pub fn page_variants(page_url: &str) -> Vec<String> {
+    let mut v = vec![page_url.to_string()];
+    let host = crate::blocker::host_of(page_url).unwrap_or("").to_ascii_lowercase();
+    if host.is_empty() {
+        return v;
+    }
+    v.push(format!("https://{host}/"));
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() >= 3 {
+        let parent = labels[1..].join(".");
+        let p: Vec<&str> = parent.split('.').collect();
+        // évite les suffixes publics du type « co.uk », « com.br »
+        let public_suffix = p.len() == 2 && p[0].len() <= 3 && p[1].len() == 2;
+        if !public_suffix {
+            v.push(format!("https://www.{parent}/"));
+            v.push(format!("https://{parent}/"));
+        }
+    }
+    let mut out: Vec<String> = Vec::new();
+    for u in v {
+        if !out.contains(&u) {
+            out.push(u);
+        }
+    }
+    out
+}
+
 /// Trouve et télécharge la meilleure icône d'un site. Bloquant (thread secondaire).
 pub fn fetch(page_url: &str) -> Option<String> {
     if !page_url.starts_with("https://") {
         return None;
     }
+    page_variants(page_url).iter().find_map(|u| fetch_one(u))
+}
+
+fn fetch_one(page_url: &str) -> Option<String> {
     let agent = crate::extensions::http_agent();
     let mut candidates = Vec::new();
     if let Some(html) = get(&agent, page_url, MAX_PAGE) {
@@ -218,6 +251,17 @@ mod tests {
         assert!(v.contains(&"https://discord.com/f32.png".to_string()));
         assert!(v.contains(&"https://discord.com/assets/favicon.ico".to_string()));
         assert!(!v.iter().any(|u| u.contains("mask") || u.contains("ignored")));
+    }
+
+    #[test]
+    fn variants_include_main_domain() {
+        assert_eq!(
+            page_variants("https://store.epicgames.com/fr/"),
+            vec!["https://store.epicgames.com/fr/", "https://store.epicgames.com/", "https://www.epicgames.com/", "https://epicgames.com/"]
+        );
+        assert_eq!(page_variants("https://discord.com/app"), vec!["https://discord.com/app", "https://discord.com/"]);
+        // pas de « co.uk » tout court
+        assert!(!page_variants("https://example.co.uk/").iter().any(|u| u == "https://co.uk/"));
     }
 
     #[test]

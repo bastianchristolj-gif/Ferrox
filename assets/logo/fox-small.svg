@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="o" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff6b2c"/>
+      <stop offset="1" stop-color="#ee4320"/>
+    </linearGradient>
+  </defs>
+  <polygon points="128,240 106,218 76,194 28,160 52,140 38,104 44,14 102,72 128,64 154,72 212,14 218,104 204,140 228,160 180,194 150,218" fill="url(#o)"/>
+  <polygon points="128,64 154,72 212,14 218,104 204,140 228,160 180,194 150,218 128,240" fill="#000" opacity=".07"/>
+  <polygon points="54,36 94,74 82,80 86,90 72,91 74,103 62,98 58,104" fill="#1c1412"/>
+  <polygon points="202,36 162,74 174,80 170,90 184,91 182,103 194,98 198,104" fill="#1c1412"/>
+  <polygon points="28,160 52,140 66,146 92,152 110,170 118,200 116,214 106,218 90,206 84,212 76,194 60,186 54,190" fill="#fff" stroke="#e9e1dc" stroke-width="1.5" stroke-linejoin="round"/>
+  <polygon points="228,160 204,140 190,146 164,152 146,170 138,200 140,214 150,218 166,206 172,212 180,194 196,186 202,190" fill="#f3eeeb" stroke="#e2d8d2" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M78 128 Q96 117 113 131 Q95 139 78 128 Z" fill="#1c1412"/>
+  <path d="M178 128 Q160 117 143 131 Q161 139 178 128 Z" fill="#1c1412"/>
+  
+  <polygon points="114,221 142,221 128,240" fill="#1c1412"/>
+</svg>

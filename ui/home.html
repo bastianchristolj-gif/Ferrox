@@ -136,14 +136,14 @@ body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !im
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (_) { return ''; } };
   const hue = (s) => { let x = 0; for (const c of s) x = (x * 31 + c.charCodeAt(0)) >>> 0; return x % 360; };
-  const avatar = (host) => { const a = el('span', 'av', (host || '?')[0]); a.style.background = `hsl(${hue(host)} 55% 40%)`; return a; };
-  function siteIcon(url) {
+  const avatar = (host, name) => { const a = el('span', 'av', ((name || host || '?').trim()[0] || '?').toUpperCase()); a.style.background = `hsl(${hue(host)} 55% 40%)`; return a; };
+  function siteIcon(url, name) {
     const host = hostOf(url);
-    if (!ICONS || !host) return avatar(host);
+    if (!ICONS || !host) return avatar(host, name);
     if (MAP[host]) { const im = el('img'); im.alt = ''; im.dataset.host = host; im.src = MAP[host]; return im; }
     const img = el('img'); img.alt = ''; img.referrerPolicy = 'no-referrer';
     img.dataset.host = host;
-    img.onerror = () => { const a = avatar(host); a.dataset.host = host; img.replaceWith(a); };
+    img.onerror = () => { const a = avatar(host, name); a.dataset.host = host; img.replaceWith(a); };
     try { img.src = new URL(url).origin.replace(/^http:/, 'https:') + '/favicon.ico'; } catch (_) { return avatar(host); }
     return img;
   }
@@ -176,7 +176,7 @@ body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !im
     const box = $('tiles'); box.replaceChildren();
     tiles.forEach((t, i) => {
       const a = el('a', 'tile'); a.href = t.url; a.draggable = true; a.style.setProperty('--i', i); a.title = t.url;
-      const ic = el('span', 'ic'); ic.append(siteIcon(t.url));
+      const ic = el('span', 'ic'); ic.append(siteIcon(t.url, t.name));
       const x = el('button', 'x', '✕'); x.title = 'Retirer';
       x.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tiles.splice(i, 1); save(); render(); });
       a.append(ic, el('span', 'nm', t.name), x);
