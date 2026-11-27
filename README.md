@@ -49,7 +49,9 @@ Le code de Ferrox lui-même (interface, onglets, sécurité, limiteurs) est écr
 
 ## Windows (cible principale)
 
-**Utiliser** : décompresser `Ferrox-windows-x64.zip` et double-cliquer sur `Ferrox.exe`. Garder `WebView2Loader.dll` dans le même dossier.
+**Installer** : lancer `Ferrox-Setup-<version>.exe`. L'installation se fait dans votre profil (`%LOCALAPPDATA%\Programs\Ferrox`), sans droits administrateur. Elle crée un raccourci dans le menu Démarrer (et sur le bureau en option) et ajoute Ferrox aux « Applications installées » pour la désinstallation. Le désinstallateur demande s'il faut aussi supprimer vos données. Pour reconstruire l'installateur depuis Linux : `installer/build.sh` (NSIS).
+
+**Version portable** : décompresser `Ferrox-windows-x64.zip` et double-cliquer sur `Ferrox.exe`. Garder `WebView2Loader.dll` dans le même dossier.
 Prérequis : Windows 10 ou 11 64 bits. Le moteur WebView2 (celui d'Edge) est déjà inclus dans Windows.
 Comme l'exe n'est pas signé, SmartScreen peut afficher « Windows a protégé votre ordinateur ». Cliquez alors sur *Informations complémentaires*, puis *Exécuter quand même*.
 

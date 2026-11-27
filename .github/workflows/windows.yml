@@ -21,6 +21,17 @@ jobs:
           Copy-Item target/release/ferrox.exe dist/
           $dll = Get-ChildItem -Recurse target/release/build -Filter WebView2Loader.dll | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
           if ($dll) { Copy-Item $dll.FullName dist/ }
+          Copy-Item installer/LISEZMOI.txt dist/Ferrox/ -ErrorAction SilentlyContinue
+      - name: Installateur (NSIS)
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force dist/Ferrox | Out-Null
+          Copy-Item dist/ferrox.exe dist/Ferrox/Ferrox.exe
+          Copy-Item dist/WebView2Loader.dll dist/Ferrox/
+          Copy-Item installer/LISEZMOI.txt dist/Ferrox/
+          & "C:\Program Files (x86)\NSIS\makensis.exe" -V2 "-DVERSION=$v" installer/ferrox.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: ferrox-windows-x64
