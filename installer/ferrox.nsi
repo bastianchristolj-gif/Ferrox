@@ -147,10 +147,15 @@ Section "${APP} (obligatoire)" SecMain
   File "..\dist\Ferrox\${EXE}"
   File "..\dist\Ferrox\WebView2Loader.dll"
   File "..\dist\Ferrox\LISEZMOI.txt"
+  ; Icône au nom versionné : Windows n'a aucune image en cache pour ce nouveau fichier,
+  ; les raccourcis affichent donc forcément le logo de cette version.
+  Delete "$INSTDIR\Ferrox-*.ico"
+  File "/oname=Ferrox-${VERSION}.ico" "..\assets\ferrox.ico"
   WriteUninstaller "$INSTDIR\Desinstaller.exe"
 
   ; Raccourci menu Démarrer
-  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0 SW_SHOWNORMAL "" "Navigateur web léger et sécurisé"
+  Delete "$SMPROGRAMS\${APP}.lnk"
+  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\Ferrox-${VERSION}.ico" 0 SW_SHOWNORMAL "" "Navigateur web léger et sécurisé"
 
   ; « Exécuter » (Win+R) → ferrox
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\${EXE}" "" "$INSTDIR\${EXE}"
@@ -159,7 +164,7 @@ Section "${APP} (obligatoire)" SecMain
   ; Désinstallation depuis « Applications installées »
   WriteRegStr HKCU "Software\${APP}" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${APP}"
-  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${EXE},0"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\Ferrox-${VERSION}.ico"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${PUBLISHER}"
   WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
@@ -169,8 +174,6 @@ Section "${APP} (obligatoire)" SecMain
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
   ; Demande à Windows de rafraîchir son cache d'icônes (sinon l'ancien logo peut rester
   ; affiché dans la barre des tâches et sur les raccourcis après une mise à jour).
-  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
-  nsExec::Exec '"$SYSDIR\ie4uinit.exe" -show'
 
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
@@ -178,12 +181,23 @@ Section "${APP} (obligatoire)" SecMain
 SectionEnd
 
 Section "Raccourci sur le bureau" SecDesktop
-  CreateShortcut "$DESKTOP\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0 SW_SHOWNORMAL "" "Navigateur web léger et sécurisé"
+  Delete "$DESKTOP\${APP}.lnk"
+  CreateShortcut "$DESKTOP\${APP}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\Ferrox-${VERSION}.ico" 0 SW_SHOWNORMAL "" "Navigateur web léger et sécurisé"
 SectionEnd
 
 ; =============================================================================
 ;  Désinstallation
 ; =============================================================================
+
+; Une fois TOUS les raccourcis créés : demande à Windows de rafraîchir ses icônes.
+Function .onInstSuccess
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
+  ; installateur 32 bits : « Sysnative » donne accès au vrai System32 de Windows 64 bits
+  IfFileExists "$WINDIR\Sysnative\ie4uinit.exe" 0 +3
+    nsExec::Exec '"$WINDIR\Sysnative\ie4uinit.exe" -show'
+    Goto +2
+    nsExec::Exec '"$SYSDIR\ie4uinit.exe" -show'
+FunctionEnd
 
 Section "Uninstall"
   Call un.CloseFerrox
@@ -193,6 +207,7 @@ Section "Uninstall"
   Delete "$INSTDIR\WebView2Loader.dll"
   Delete "$INSTDIR\LISEZMOI.txt"
   Delete "$INSTDIR\Desinstaller.exe"
+  Delete "$INSTDIR\Ferrox-*.ico"
   RMDir "$INSTDIR"
 
   Delete "$SMPROGRAMS\${APP}.lnk"
