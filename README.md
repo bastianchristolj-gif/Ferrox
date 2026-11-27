@@ -74,9 +74,9 @@ cargo build --release
 
 ## Configuration
 
-- Paramètres : `%APPDATA%\\ferrox\\settings.json` sous Windows, `~/.config/ferrox/settings.json` sous Linux (modifiables depuis l'interface)
+- Paramètres : `%APPDATA%\ferrox\settings.json` sous Windows, `~/.config/ferrox/settings.json` sous Linux (modifiables depuis l'interface)
 - Liste de blocage personnalisée : `blocklist.txt` dans le même dossier. Un domaine par ligne, le format « hosts » est accepté. Vous pouvez par exemple y coller la liste [StevenBlack/hosts](https://github.com/StevenBlack/hosts).
-- Profil (cookies, cache) : `%LOCALAPPDATA%\\ferrox\\profile` sous Windows, `~/.local/share/ferrox/profile` sous Linux
+- Profil (cookies, cache) : `%LOCALAPPDATA%\ferrox\profile` sous Windows, `~/.local/share/ferrox/profile` sous Linux
 
 ## Limites connues (v0.1)
 
