@@ -1,8 +1,15 @@
 name: Windows
 
+# - À chaque envoi : compilation, tests, installateur (téléchargeable dans l'onglet Actions).
+# - Étiquette « vX.Y.Z » : en plus, publication automatique de la Release GitHub.
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -14,25 +21,47 @@ jobs:
         run: cargo build --release
       - name: Tests
         run: cargo test --release
-      - name: Empaqueter
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/ferrox.exe dist/
-          $dll = Get-ChildItem -Recurse target/release/build -Filter WebView2Loader.dll | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
-          if ($dll) { Copy-Item $dll.FullName dist/ }
-          Copy-Item installer/LISEZMOI.txt dist/Ferrox/ -ErrorAction SilentlyContinue
-      - name: Installateur (NSIS)
+      - name: Empaqueter + installateur (NSIS)
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
           $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
           New-Item -ItemType Directory -Force dist/Ferrox | Out-Null
-          Copy-Item dist/ferrox.exe dist/Ferrox/Ferrox.exe
-          Copy-Item dist/WebView2Loader.dll dist/Ferrox/
+          Copy-Item target/release/ferrox.exe dist/Ferrox/Ferrox.exe
+          $dll = Get-ChildItem -Recurse target/release/build -Filter WebView2Loader.dll | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          Copy-Item $dll.FullName dist/Ferrox/
           Copy-Item installer/LISEZMOI.txt dist/Ferrox/
           & "C:\Program Files (x86)\NSIS\makensis.exe" -V2 "-DVERSION=$v" installer/ferrox.nsi
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Paquet de distribution : installateur + version portable + empreintes SHA-256
+          $pkg = "dist/Ferrox-$v-windows"
+          New-Item -ItemType Directory -Force "$pkg/Ferrox-portable" | Out-Null
+          Copy-Item dist/Ferrox/* "$pkg/Ferrox-portable/"
+          Copy-Item "dist/Ferrox-Setup-$v.exe" "$pkg/"
+          Push-Location $pkg
+          $sums = Get-ChildItem -Recurse -File | Sort-Object FullName | ForEach-Object {
+            $rel = (Resolve-Path -Relative $_.FullName).TrimStart('.', '\').Replace('\', '/')
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $rel
+          }
+          $sums | Out-File -Encoding ascii SHA256SUMS.txt
+          Pop-Location
+          Compress-Archive -Path $pkg -DestinationPath "dist/Ferrox-$v-windows.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
           name: ferrox-windows-x64
-          path: dist/
+          path: |
+            dist/Ferrox-*-windows.zip
+            dist/Ferrox-Setup-*.exe
+      - name: Publier la Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME `
+            --title "Ferrox $env:VERSION" `
+            --notes-file installer/RELEASE_NOTES.md `
+            "dist/Ferrox-Setup-$env:VERSION.exe" `
+            "dist/Ferrox-$env:VERSION-windows.zip" `
+            "dist/Ferrox-$env:VERSION-windows/SHA256SUMS.txt"
