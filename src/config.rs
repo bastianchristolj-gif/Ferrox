@@ -135,7 +135,7 @@ impl Default for Settings {
             download_dir: String::new(),
             autofill: true,
             save_passwords: true,
-            search_url: "https://duckduckgo.com/?q={}".into(),
+            search_url: SEARCH_ENGINES[0].into(),
             home_url: "ferrox://home".into(),
             adblock: true,
             https_only: true,
@@ -152,6 +152,9 @@ impl Default for Settings {
         }
     }
 }
+
+/// Moteurs de recherche proposés (le premier est celui par défaut).
+pub const SEARCH_ENGINES: &[&str] = &["https://search.brave.com/search?q={}", "https://www.google.com/search?q={}"];
 
 /// Thèmes disponibles (définis visuellement dans ui/index.html).
 pub const THEMES: &[&str] = &["plasma", "nebula", "glacier", "toxic", "magma", "ghost"];
@@ -207,7 +210,8 @@ impl Settings {
         if !hex_ok {
             self.accent = d.accent.clone();
         }
-        if !(self.search_url.starts_with("https://") && self.search_url.contains("{}")) {
+        // Seuls Brave Search et Google sont proposés : tout autre moteur repasse sur Brave.
+        if !SEARCH_ENGINES.contains(&self.search_url.as_str()) {
             self.search_url = d.search_url.clone();
         }
         if !(self.home_url.starts_with("https://") || self.home_url == "ferrox://home") {
@@ -254,6 +258,26 @@ impl Session {
                     let _ = std::fs::rename(&tmp, session_path());
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_brave_and_google() {
+        let d = Settings::default();
+        assert_eq!(d.search_url, "https://search.brave.com/search?q={}");
+        for (input, expected) in [
+            ("https://duckduckgo.com/?q={}", "https://search.brave.com/search?q={}"),
+            ("https://www.bing.com/search?q={}", "https://search.brave.com/search?q={}"),
+            ("https://www.google.com/search?q={}", "https://www.google.com/search?q={}"),
+            ("https://search.brave.com/search?q={}", "https://search.brave.com/search?q={}"),
+        ] {
+            let s = Settings { search_url: input.into(), ..Settings::default() }.sanitized();
+            assert_eq!(s.search_url, expected, "{input}");
         }
     }
 }

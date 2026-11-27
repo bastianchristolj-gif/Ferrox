@@ -11,7 +11,7 @@ Le binaire release fait environ **1,2 Mo**.
 | **Bouclier** | Bloqueur de publicités, de traqueurs et de cryptomineurs : blocage des navigations, de `fetch`, XHR, `sendBeacon`, des balises script/img/iframe et masquage CSS des emplacements pub. Un compteur affiche le nombre d'éléments bloqués par page. |
 | **Sécurité** | Mode HTTPS uniquement. Les permissions caméra, micro et position sont refusées. `file://` et `javascript:` sont refusés. Les popups s'ouvrent dans des onglets. Global Privacy Control et DNT sont envoyés. Option anti-empreinte (sans WebGL ni WebAudio). Onglets privés. |
 | **Linux** | Les processus web sont isolés dans un **sandbox bubblewrap** si `bwrap` est installé. ITP (anti-pistage intersites) est activé. Le préchargement DNS et le cache de pages sont désactivés. |
-| **Interface** | Page *Paramètres* complète (`ferrox://settings`) avec recherche, 6 thèmes, couleur d'accent libre, animations désactivables. Choix du moteur de recherche (DuckDuckGo par défaut), page d'accueil personnalisée. Fermer le dernier onglet quitte le navigateur. |
+| **Interface** | Page *Paramètres* complète (`ferrox://settings`) avec recherche, 6 thèmes, couleur d'accent libre, animations désactivables. Moteur de recherche : Brave Search (par défaut) ou Google, page d'accueil personnalisée. Fermer le dernier onglet quitte le navigateur. |
 
 ### Raccourcis
 

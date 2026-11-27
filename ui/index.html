@@ -818,7 +818,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
   function avatar(host) {
     return h('span', { class: 'av', style: `background:hsl(${hue(host)} 55% 38%)` }, (host || '?')[0]);
   }
-  /** Icône d'un site : celle fournie par la page, sinon service d'icônes de DuckDuckGo, sinon une lettre. */
+  /** Icône d'un site : celle fournie par la page, sinon /favicon.ico du site, sinon une lettre. */
   function siteIcon(url, given) {
     const host = hostOf(url);
     // Icône demandée au site lui-même (aucun service tiers ne voit les sites visités).
@@ -827,7 +827,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     if (!src) return avatar(host);
     const img = h('img', { alt: '', referrerpolicy: 'no-referrer', loading: 'lazy' });
     img.addEventListener('error', () => {
-      // l'icône de la page a échoué → on tente DuckDuckGo, puis la lettre
+      // l'icône de la page a échoué → on tente /favicon.ico du site, puis la lettre
       if (given && S.settings.site_icons && origin && !img.dataset.f) { img.dataset.f = '1'; img.src = origin + '/favicon.ico'; }
       else img.replaceWith(avatar(host));
     });
@@ -1159,17 +1159,13 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     sw.append(h('label', { class: 'colorpick', title: 'Couleur personnalisée' }, picker, h('span', {}, '+')));
 
     const engines = [
-      { label: 'DuckDuckGo', hint: 'privé', value: 'https://duckduckgo.com/?q={}' },
-      { label: 'Brave Search', hint: 'privé', value: 'https://search.brave.com/search?q={}' },
-      { label: 'Startpage', hint: 'privé', value: 'https://www.startpage.com/do/search?q={}' },
-      { label: 'Qwant', hint: 'européen', value: 'https://www.qwant.com/?q={}' },
-      { label: 'Ecosia', hint: 'écolo', value: 'https://www.ecosia.org/search?q={}' },
-      { label: 'Bing', hint: '', value: 'https://www.bing.com/search?q={}' },
+      { label: 'Brave Search', hint: 'privé · par défaut', value: 'https://search.brave.com/search?q={}' },
       { label: 'Google', hint: '', value: 'https://www.google.com/search?q={}' },
     ];
     const homes = [
       { label: 'Page Ferrox', hint: 'par défaut', value: 'ferrox://home' },
-      { label: 'DuckDuckGo', hint: '', value: 'https://duckduckgo.com' },
+      { label: 'Brave Search', hint: '', value: 'https://search.brave.com' },
+      { label: 'Google', hint: '', value: 'https://www.google.com' },
       { label: 'YouTube', hint: '', value: 'https://www.youtube.com' },
       { label: 'Twitch', hint: '', value: 'https://www.twitch.tv' },
     ];
@@ -1198,7 +1194,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Afficher la RAM dans la barre d\'outils', 'Mémoire utilisée par Ferrox et ses processus.', tgl('show_ram'), 'mémoire'),
         row('Fond animé sur la page Nouvel onglet', 'Grille lumineuse derrière la recherche.', tgl('wallpaper'), 'fond écran wallpaper'))),
       sec('recherche', 'Moteur de recherche', h('div', { class: 'pg-card' },
-        row('Moteur utilisé dans la barre d\'adresse', 'Les moteurs « privés » ne vous pistent pas.', dropdown(engines, S.settings.search_url, (v) => setS({ search_url: v })), 'search'))),
+        row('Moteur utilisé dans la barre d\'adresse', 'Brave Search ne vous piste pas ; Google personnalise les résultats selon votre compte.', dropdown(engines, S.settings.search_url, (v) => setS({ search_url: v })), 'search brave google'))),
       sec('demarrage', 'Au démarrage et page d\'accueil', h('div', { class: 'pg-card' },
         row('Page d\'accueil', 'Ouverte par le bouton Accueil et au démarrage.', dropdown(homes, S.settings.home_url, (v) => setS({ home_url: v })), 'home'),
         row('Adresse personnalisée', 'Uniquement en HTTPS.', custom, 'home url'),
