@@ -148,8 +148,15 @@ fn main() {
         .with_decorations(false) // barre de titre intégrée aux onglets
         .with_inner_size(LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(LogicalSize::new(640.0, 400.0))
+        .with_window_icon(app_icon());
+    #[cfg(target_os = "windows")]
+    let window = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        window.with_undecorated_shadow(true) // ombre native Windows malgré l'absence de bordure
+    };
+    let window = window
         .build(&event_loop)
-        .expect("impossible de créer la fenêtre");
+        .unwrap_or_else(|e| fatal(&format!("Impossible de créer la fenêtre : {e}")));
 
     #[cfg(target_os = "linux")]
     let fixed = {
@@ -183,7 +190,18 @@ fn main() {
             // L'interface ne doit jamais naviguer ailleurs.
             .with_navigation_handler(|url| url.starts_with("about:") || url.starts_with("data:"))
             .with_new_window_req_handler(|_, _| NewWindowResponse::Deny);
-        build(builder, &window, #[cfg(target_os = "linux")] &fixed).expect("WebView interface")
+        #[cfg(target_os = "windows")]
+        let builder = {
+            use wry::WebViewBuilderExtWindows;
+            builder.with_default_context_menus(false).with_browser_accelerator_keys(false)
+        };
+        build(builder, &window, #[cfg(target_os = "linux")] &fixed).unwrap_or_else(|e| {
+            fatal(&format!(
+                "Impossible de démarrer le moteur web.\n\n{e}\n\n\
+                 Sous Windows, installez « Microsoft Edge WebView2 Runtime » \
+                 (https://go.microsoft.com/fwlink/p/?LinkId=2124703) puis relancez Ferrox."
+            ))
+        })
     };
 
     let blocker = Arc::new(Blocker::load());
@@ -238,6 +256,20 @@ fn main() {
     });
 }
 
+/// Affiche une erreur bloquante (boîte de dialogue sous Windows) puis quitte.
+fn fatal(msg: &str) -> ! {
+    eprintln!("{msg}");
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (text, title) = (w(msg), w("Ferrox"));
+        // SAFETY: chaînes UTF-16 terminées par 0, valides pendant l'appel.
+        unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR) };
+    }
+    std::process::exit(1)
+}
+
 #[cfg(target_os = "linux")]
 fn which(bin: &str) -> bool {
     std::env::var_os("PATH")
@@ -256,10 +288,51 @@ fn build(
         use wry::WebViewBuilderExtUnix;
         builder.build_gtk(fixed)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
+    {
+        use wry::WebViewBuilderExtWindows;
+        // Toutes les vues partagent le même dossier de profil : WebView2 exige des
+        // arguments identiques. On garde SmartScreen (anti-phishing) actif, que wry
+        // désactive par défaut, et on coupe la télémétrie / les pings.
+        builder
+            .with_additional_browser_args(WEBVIEW2_ARGS)
+            .build_as_child(window)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
         builder.build_as_child(window)
     }
+}
+
+#[cfg(target_os = "windows")]
+const WEBVIEW2_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeShoppingAssistant,\
+AutofillServerCommunication,msEdgeCollections --no-pings --disable-domain-reliability";
+
+/// Icône de fenêtre (hexagone d'accent) générée en mémoire : aucun fichier à charger.
+fn app_icon() -> Option<tao::window::Icon> {
+    const N: u32 = 64;
+    let mut rgba = Vec::with_capacity((N * N * 4) as usize);
+    let c = N as f32 / 2.0;
+    for y in 0..N {
+        for x in 0..N {
+            let (dx, dy) = ((x as f32 + 0.5 - c).abs(), (y as f32 + 0.5 - c).abs());
+            let r = c - 2.0;
+            // hexagone "pointe en haut"
+            let inside = dx <= r * 0.866 && dy <= r - dx * 0.577;
+            let edge = inside && !(dx <= r * 0.866 - 5.0 && dy <= r - 5.0 - dx * 0.577);
+            // lettre F
+            let (fx, fy) = (x as i32 - 24, y as i32 - 18);
+            let letter = (0..6).contains(&fx) && (0..28).contains(&fy)
+                || (0..20).contains(&fx) && (0..6).contains(&fy)
+                || (0..15).contains(&fx) && (11..16).contains(&fy);
+            let px = if letter && inside { [255, 255, 255, 255] }
+                else if edge { [250, 30, 78, 255] }
+                else if inside { [26, 10, 16, 255] }
+                else { [0, 0, 0, 0] };
+            rgba.extend_from_slice(&px);
+        }
+    }
+    tao::window::Icon::from_rgba(rgba, N, N).ok()
 }
 
 fn logical_size(window: &Window) -> (u32, u32) {
@@ -384,7 +457,8 @@ impl App {
         let adblock = self.settings.adblock;
 
         let mut builder = if private {
-            WebViewBuilder::new().with_incognito(true)
+            // Même environnement (exigé par WebView2), mais session InPrivate éphémère.
+            WebViewBuilder::new_with_web_context(&mut self.ctx).with_incognito(true)
         } else {
             WebViewBuilder::new_with_web_context(&mut self.ctx)
         };

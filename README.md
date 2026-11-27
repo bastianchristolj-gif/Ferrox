@@ -27,7 +27,34 @@ Ferrox n'embarque **pas** Chromium. Il utilise le moteur web déjà présent sur
 
 Le code de Ferrox lui-même (interface, onglets, sécurité, limiteurs) est écrit en Rust : pas de garbage collector, et la mémoire est sûre.
 
-## Compiler
+## Windows (cible principale)
+
+**Utiliser** : décompresser `Ferrox-windows-x64.zip` et double-cliquer sur `Ferrox.exe`. Garder `WebView2Loader.dll` dans le même dossier.
+Prérequis : Windows 10 ou 11 64 bits. Le moteur WebView2 (celui d'Edge) est déjà inclus dans Windows.
+Comme l'exe n'est pas signé, SmartScreen peut afficher « Windows a protégé votre ordinateur ». Cliquez alors sur *Informations complémentaires*, puis *Exécuter quand même*.
+
+Ce qui est propre à Windows :
+- fenêtre sans bordure avec ombre native et icône ;
+- SmartScreen anti-phishing actif (wry le coupe par défaut, Ferrox le réactive) ;
+- télémétrie et pings coupés ;
+- sandbox Chromium de WebView2 ;
+- onglets privés en mode InPrivate.
+
+**Compiler sur Windows** : installer [Rust](https://rustup.rs) (avec les *Visual Studio Build Tools*), puis :
+```powershell
+cargo build --release
+```
+L'exe est produit dans `target\release\ferrox.exe`.
+
+**Compiler depuis Linux** (compilation croisée) :
+```bash
+sudo apt install mingw-w64 && rustup target add x86_64-pc-windows-gnu
+cargo build --release --target x86_64-pc-windows-gnu
+```
+
+**GitHub Actions** : `.github/workflows/windows.yml` compile et teste sur un vrai Windows à chaque push. L'exe est téléchargeable dans l'onglet *Actions*.
+
+## Compiler (Linux / macOS)
 
 Prérequis : [Rust](https://rustup.rs).
 
@@ -47,9 +74,9 @@ cargo build --release
 
 ## Configuration
 
-- Paramètres : `~/.config/ferrox/settings.json` (modifiables depuis l'interface)
-- Liste de blocage personnalisée : `~/.config/ferrox/blocklist.txt`. Un domaine par ligne, le format « hosts » est accepté. Vous pouvez par exemple y coller la liste [StevenBlack/hosts](https://github.com/StevenBlack/hosts).
-- Profil (cookies, cache) : `~/.local/share/ferrox/profile`
+- Paramètres : `%APPDATA%\\ferrox\\settings.json` sous Windows, `~/.config/ferrox/settings.json` sous Linux (modifiables depuis l'interface)
+- Liste de blocage personnalisée : `blocklist.txt` dans le même dossier. Un domaine par ligne, le format « hosts » est accepté. Vous pouvez par exemple y coller la liste [StevenBlack/hosts](https://github.com/StevenBlack/hosts).
+- Profil (cookies, cache) : `%LOCALAPPDATA%\\ferrox\\profile` sous Windows, `~/.local/share/ferrox/profile` sous Linux
 
 ## Limites connues (v0.1)
 

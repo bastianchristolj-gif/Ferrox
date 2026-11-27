@@ -321,7 +321,7 @@ select:focus, .txt:focus { border-color: var(--accent); }
         toggle('block_permissions', 'Bloquer caméra / micro / position', 'Refus automatique des permissions'),
         toggle('anti_fingerprint', 'Anti-empreinte strict', 'Désactive WebGL et WebAudio')),
       h('div', { class: 'card' }, h('small', { style: 'color:var(--dim)' },
-        'Toujours actifs : Global Privacy Control, Do-Not-Track, pas de préchargement DNS, popups → onglets, schémas file:// et javascript: refusés, ITP (Linux), processus web isolés (sandbox bubblewrap si installé).')),
+        'Toujours actifs : Global Privacy Control, Do-Not-Track, pas de préchargement DNS, popups → onglets, schémas file:// et javascript: refusés, processus web isolés dans un bac à sable (sandbox Chromium sous Windows, bubblewrap sous Linux), SmartScreen anti-phishing (Windows), ITP (Linux).')),
       h('button', { class: 'btn', onclick: () => send({ cmd: 'clear_data' }) }, 'Effacer cookies & données de navigation'));
   }
 
