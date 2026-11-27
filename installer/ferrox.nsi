@@ -167,6 +167,11 @@ Section "${APP} (obligatoire)" SecMain
   WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\Desinstaller.exe" /S'
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
+  ; Demande à Windows de rafraîchir son cache d'icônes (sinon l'ancien logo peut rester
+  ; affiché dans la barre des tâches et sur les raccourcis après une mise à jour).
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
+  nsExec::Exec '"$SYSDIR\ie4uinit.exe" -show'
+
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"

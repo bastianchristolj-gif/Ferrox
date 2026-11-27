@@ -243,7 +243,11 @@ fn main() {
     #[cfg(target_os = "windows")]
     let window = {
         use tao::platform::windows::WindowBuilderExtWindows;
-        window.with_undecorated_shadow(true) // ombre native Windows malgré l'absence de bordure
+        window
+            .with_undecorated_shadow(true) // ombre native Windows malgré l'absence de bordure
+            // Grande icône (barre des tâches, Alt+Tab) fixée par Ferrox lui-même : elle ne dépend
+            // pas du cache d'icônes de Windows, qui peut garder une ancienne version de l'exe.
+            .with_taskbar_icon(taskbar_icon())
     };
     let window = window
         .build(&event_loop)
@@ -531,6 +535,12 @@ const WEBVIEW2_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeShoppi
 AutofillServerCommunication,msEdgeCollections --no-pings --disable-domain-reliability";
 
 /// Icône de fenêtre : le renard Ferrox (64×64 RGBA, généré depuis assets/logo/fox.svg).
+#[cfg(target_os = "windows")]
+fn taskbar_icon() -> Option<tao::window::Icon> {
+    const RGBA: &[u8] = include_bytes!("../assets/logo/icon128.rgba");
+    tao::window::Icon::from_rgba(RGBA.to_vec(), 128, 128).ok()
+}
+
 fn app_icon() -> Option<tao::window::Icon> {
     const RGBA: &[u8] = include_bytes!("../assets/logo/icon64.rgba");
     tao::window::Icon::from_rgba(RGBA.to_vec(), 64, 64).ok()
