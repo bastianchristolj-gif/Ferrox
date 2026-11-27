@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Nouvel onglet</title>
+<style>
+:root { --accent: __ACCENT__; }
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body { background: radial-gradient(ellipse at 50% 120%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%), #0d0b12;
+  color: #ece8f4; font: 14px "Inter", "Segoe UI", "Cantarell", system-ui, sans-serif; display: grid; place-items: center; overflow: hidden; }
+.grid { position: fixed; inset: 0; background-image: linear-gradient(#ffffff08 1px, transparent 1px), linear-gradient(90deg, #ffffff08 1px, transparent 1px);
+  background-size: 48px 48px; mask-image: radial-gradient(ellipse at center, #000 20%, transparent 75%); pointer-events: none; }
+main { width: min(640px, 90vw); text-align: center; position: relative; }
+h1 { font-size: 58px; font-weight: 900; letter-spacing: 10px; margin-bottom: 6px;
+  background: linear-gradient(90deg, #fff, var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 50%, transparent)); }
+p { color: #8d86a0; letter-spacing: 3px; text-transform: uppercase; font-size: 11px; margin-bottom: 34px; }
+form { display: flex; height: 52px; background: #15121d; border: 1px solid #2a2438; border-radius: 12px; overflow: hidden; transition: .2s; }
+form:focus-within { border-color: var(--accent); box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 40%, transparent); }
+input { flex: 1; background: none; border: 0; outline: 0; color: inherit; font: inherit; font-size: 16px; padding: 0 20px; }
+button { width: 60px; border: 0; background: var(--accent); color: #fff; font-size: 20px; cursor: pointer; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 34px; }
+.tiles a { display: block; padding: 16px 8px; background: #15121d; border: 1px solid #2a2438; border-radius: 10px; color: #ece8f4; text-decoration: none; font-size: 12px; transition: .15s; }
+.tiles a:hover { border-color: var(--accent); transform: translateY(-2px); }
+.tiles b { display: block; font-size: 20px; margin-bottom: 4px; color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="grid"></div>
+<main>
+  <h1>FERROX</h1>
+  <p>Rapide · Léger · Sécurisé · Rust</p>
+  <form id="f"><input id="q" autofocus placeholder="Rechercher sur le web…" autocomplete="off"><button aria-label="Rechercher">➜</button></form>
+  <div class="tiles">
+    <a href="https://www.twitch.tv"><b>▶</b>Twitch</a>
+    <a href="https://www.youtube.com"><b>▣</b>YouTube</a>
+    <a href="https://store.steampowered.com"><b>◆</b>Steam</a>
+    <a href="https://www.reddit.com/r/gaming"><b>●</b>Reddit</a>
+  </div>
+</main>
+<script>
+  const SEARCH = __SEARCH__;
+  document.getElementById('f').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = document.getElementById('q').value.trim();
+    if (!v) return;
+    const isUrl = /^https?:\/\//i.test(v) || (/^[^\s]+\.[a-z]{2,}(\/.*)?$/i.test(v));
+    location.href = isUrl ? (/^https?:\/\//i.test(v) ? v : 'https://' + v) : SEARCH.replace('{}', encodeURIComponent(v));
+  });
+</script>
+</body>
+</html>

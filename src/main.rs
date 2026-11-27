@@ -1,0 +1,881 @@
+//! Ferrox — navigateur web léger et sécurisé, interface "gaming", écrit en Rust.
+//!
+//! Architecture :
+//! - une fenêtre native (tao) ;
+//! - une WebView "interface" (onglets, barre d'adresse, barre latérale, panneaux)
+//!   qui couvre toute la fenêtre ;
+//! - une WebView par onglet, posée par-dessus dans la zone de contenu.
+//!   Le moteur de rendu est celui du système (WebKitGTK / WebView2 / WKWebView) :
+//!   aucun Chromium embarqué → binaire de quelques Mo et RAM réduite.
+//! - Les onglets en arrière-plan sont mis en veille (WebView détruite, URL conservée).
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod blocker;
+mod config;
+mod monitor;
+
+use blocker::Blocker;
+use config::Settings;
+use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tao::{
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
+    window::{Window, WindowBuilder},
+};
+use wry::{
+    BackgroundThrottlingPolicy, NewWindowResponse, PageLoadEvent, PermissionKind,
+    PermissionResponse, Rect, WebContext, WebView, WebViewBuilder,
+    dpi::{LogicalPosition, LogicalSize as WLogicalSize},
+};
+
+const TOP_H: u32 = 84;
+const SIDE_W: u32 = 56;
+const PANEL_W: u32 = 320;
+const TICK: Duration = Duration::from_secs(2);
+
+const UI_HTML: &str = include_str!("../ui/index.html");
+const HOME_HTML: &str = include_str!("../ui/home.html");
+const HOME_URL: &str = "ferrox://home";
+
+// ---------------------------------------------------------------------------
+// Événements internes
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+enum UserEvent {
+    Ui(String),
+    Title(u64, String),
+    Load(u64, bool, String),
+    OpenTab(String),
+    Blocked(u64, u32),
+    Key(u64, String),
+    NavBlocked(u64, String),
+    HttpBlocked(u64, String),
+    Download(String, bool),
+}
+
+/// Commandes envoyées par l'interface (JSON). Tout champ inattendu est rejeté.
+#[derive(Deserialize, Debug)]
+#[serde(tag = "cmd", rename_all = "snake_case", deny_unknown_fields)]
+enum UiCmd {
+    Ready,
+    Navigate { input: String },
+    NewTab { private: bool },
+    Close { id: u64 },
+    Switch { id: u64 },
+    Sleep { id: u64 },
+    Back,
+    Forward,
+    Reload,
+    Home,
+    Panel { name: Option<String> },
+    Settings { settings: Settings },
+    AllowHttp { url: String },
+    ClearData,
+}
+
+// ---------------------------------------------------------------------------
+// Onglets
+// ---------------------------------------------------------------------------
+
+struct Tab {
+    id: u64,
+    title: String,
+    url: String,
+    wv: Option<WebView>,
+    last_active: Instant,
+    private: bool,
+    loading: bool,
+    blocked: u32,
+}
+
+/// Drapeaux partagés avec les callbacks des WebViews (qui doivent être 'static).
+#[derive(Clone)]
+struct Shared {
+    blocker: Arc<Blocker>,
+    script: Arc<String>,
+    adblock: Arc<AtomicBool>,
+    https_only: Arc<AtomicBool>,
+    block_perms: Arc<AtomicBool>,
+    http_allowed: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+}
+
+struct App {
+    window: Window,
+    #[cfg(target_os = "linux")]
+    fixed: gtk::Fixed,
+    ui: WebView,
+    ctx: WebContext,
+    tabs: Vec<Tab>,
+    active: Option<u64>,
+    next_id: u64,
+    settings: Settings,
+    shared: Shared,
+    proxy: EventLoopProxy<UserEvent>,
+    panel: Option<String>,
+    monitor: monitor::Monitor,
+    usage: monitor::Usage,
+    blocked_total: u64,
+    notice: Option<serde_json::Value>,
+}
+
+fn main() {
+    // Sandbox des processus web WebKitGTK (bubblewrap) si disponible.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_FORCE_SANDBOX").is_none() && which("bwrap") {
+        // SAFETY: appelé au tout début de main, avant la création de tout thread.
+        unsafe { std::env::set_var("WEBKIT_FORCE_SANDBOX", "1") };
+    }
+
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let proxy = event_loop.create_proxy();
+    let settings = Settings::load();
+
+    let window = WindowBuilder::new()
+        .with_title("Ferrox")
+        .with_inner_size(LogicalSize::new(1280.0, 800.0))
+        .with_min_inner_size(LogicalSize::new(640.0, 400.0))
+        .build(&event_loop)
+        .expect("impossible de créer la fenêtre");
+
+    #[cfg(target_os = "linux")]
+    let fixed = {
+        use gtk::prelude::*;
+        use tao::platform::unix::WindowExtUnix;
+        let fixed = gtk::Fixed::new();
+        let vbox = window.default_vbox().expect("vbox GTK");
+        vbox.pack_start(&fixed, true, true, 0);
+        fixed.show_all();
+        fixed
+    };
+
+    let _ = std::fs::create_dir_all(config::data_dir());
+    // Un seul contexte (et donc un seul processus réseau) pour l'interface et les onglets.
+    let mut ctx = WebContext::new(Some(config::data_dir()));
+
+    let ui = {
+        let p = proxy.clone();
+        let builder = WebViewBuilder::new_with_web_context(&mut ctx)
+            .with_html(UI_HTML)
+            .with_bounds(full_rect(&window))
+            .with_background_color((18, 16, 25, 255))
+            .with_devtools(cfg!(debug_assertions))
+            .with_hotkeys_zoom(false)
+            .with_ipc_handler(move |req| {
+                let body = req.into_body();
+                if body.len() <= 64 * 1024 {
+                    let _ = p.send_event(UserEvent::Ui(body));
+                }
+            })
+            // L'interface ne doit jamais naviguer ailleurs.
+            .with_navigation_handler(|url| url.starts_with("about:") || url.starts_with("data:"))
+            .with_new_window_req_handler(|_, _| NewWindowResponse::Deny);
+        build(builder, &window, #[cfg(target_os = "linux")] &fixed).expect("WebView interface")
+    };
+
+    let blocker = Arc::new(Blocker::load());
+    let shared = Shared {
+        script: Arc::new(blocker.content_script()),
+        blocker,
+        adblock: Arc::new(AtomicBool::new(settings.adblock)),
+        https_only: Arc::new(AtomicBool::new(settings.https_only)),
+        block_perms: Arc::new(AtomicBool::new(settings.block_permissions)),
+        http_allowed: Default::default(),
+    };
+
+    let mut app = App {
+        window,
+        #[cfg(target_os = "linux")]
+        fixed,
+        ui,
+        ctx,
+        tabs: Vec::new(),
+        active: None,
+        next_id: 1,
+        settings,
+        shared,
+        proxy,
+        panel: None,
+        monitor: monitor::Monitor::new(),
+        usage: Default::default(),
+        blocked_total: 0,
+        notice: None,
+    };
+
+    let start = std::env::args().nth(1).map(|a| app.resolve_input(&a));
+    app.new_tab(start.as_deref().unwrap_or(HOME_URL).to_string(), false);
+
+    let mut next_tick = Instant::now() + TICK;
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::WaitUntil(next_tick);
+        match event {
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                app.settings.save();
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::WindowEvent { event: WindowEvent::Resized(_), .. } => app.layout(),
+            Event::UserEvent(ev) => app.on_event(ev),
+            Event::NewEvents(tao::event::StartCause::ResumeTimeReached { .. }) => {
+                next_tick = Instant::now() + TICK;
+                *control_flow = ControlFlow::WaitUntil(next_tick);
+                app.tick();
+            }
+            _ => {}
+        }
+    });
+}
+
+#[cfg(target_os = "linux")]
+fn which(bin: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).is_file()))
+        .unwrap_or(false)
+}
+
+fn build(
+    builder: WebViewBuilder<'_>,
+    window: &Window,
+    #[cfg(target_os = "linux")] fixed: &gtk::Fixed,
+) -> wry::Result<WebView> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = window;
+        use wry::WebViewBuilderExtUnix;
+        builder.build_gtk(fixed)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        builder.build_as_child(window)
+    }
+}
+
+fn logical_size(window: &Window) -> (u32, u32) {
+    let s = window.inner_size().to_logical::<u32>(window.scale_factor());
+    (s.width, s.height)
+}
+
+fn full_rect(window: &Window) -> Rect {
+    let (w, h) = logical_size(window);
+    Rect {
+        position: LogicalPosition::new(0, 0).into(),
+        size: WLogicalSize::new(w, h).into(),
+    }
+}
+
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn is_local_host(host: &str) -> bool {
+    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
+}
+
+impl App {
+    // ------------------------------------------------------------------ layout
+    fn content_rect(&self) -> Rect {
+        let (w, h) = logical_size(&self.window);
+        let x = SIDE_W + if self.panel.is_some() { PANEL_W } else { 0 };
+        Rect {
+            position: LogicalPosition::new(x, TOP_H).into(),
+            size: WLogicalSize::new(w.saturating_sub(x).max(1), h.saturating_sub(TOP_H).max(1)).into(),
+        }
+    }
+
+    fn layout(&mut self) {
+        let _ = self.ui.set_bounds(full_rect(&self.window));
+        let r = self.content_rect();
+        for t in &self.tabs {
+            if let Some(wv) = &t.wv {
+                let _ = wv.set_bounds(r);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- onglets
+    fn idx(&self, id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == id)
+    }
+
+    fn resolve_input(&self, input: &str) -> String {
+        let s = input.trim();
+        if s.is_empty() || s == HOME_URL {
+            return HOME_URL.into();
+        }
+        let lower = s.to_ascii_lowercase();
+        if lower.starts_with("https://") {
+            return s.into();
+        }
+        if lower.starts_with("http://") {
+            let host = blocker::host_of(s).unwrap_or("");
+            if self.settings.https_only && !is_local_host(host) {
+                return format!("https://{}", &s[7..]);
+            }
+            return s.into();
+        }
+        let looks_like_host = !s.contains(char::is_whitespace)
+            && (s.contains('.') || s.starts_with("localhost"))
+            && !s.starts_with('.')
+            && !s.ends_with('.');
+        if looks_like_host {
+            let host = s.split(['/', ':']).next().unwrap_or("");
+            let scheme = if is_local_host(host) { "http" } else { "https" };
+            return format!("{scheme}://{s}");
+        }
+        self.settings.search_url.replace("{}", &percent_encode(s))
+    }
+
+    fn home_html(&self) -> String {
+        // accent validé (#rrggbb) et URL de recherche encodée en JSON : pas d'injection.
+        let search = serde_json::to_string(&self.settings.search_url).unwrap_or_else(|_| "\"\"".into());
+        HOME_HTML.replace("__ACCENT__", &self.settings.accent).replace("__SEARCH__", &search)
+    }
+
+    fn new_tab(&mut self, url: String, private: bool) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.tabs.push(Tab {
+            id,
+            title: if url == HOME_URL { "Nouvel onglet".into() } else { url.clone() },
+            url,
+            wv: None,
+            last_active: Instant::now(),
+            private,
+            loading: false,
+            blocked: 0,
+        });
+        self.switch(id);
+    }
+
+    fn create_webview(&mut self, idx: usize) {
+        let (id, url, private) = {
+            let t = &self.tabs[idx];
+            (t.id, t.url.clone(), t.private)
+        };
+        let sh = self.shared.clone();
+        let p = self.proxy.clone();
+        let rect = self.content_rect();
+        let home = (url == HOME_URL).then(|| self.home_html());
+        let adblock = self.settings.adblock;
+
+        let mut builder = if private {
+            WebViewBuilder::new().with_incognito(true)
+        } else {
+            WebViewBuilder::new_with_web_context(&mut self.ctx)
+        };
+
+        if adblock {
+            builder = builder.with_initialization_script(sh.script.as_str());
+        }
+        builder = builder.with_initialization_script(PRIVACY_SCRIPT);
+
+        let nav = {
+            let (sh, p) = (sh.clone(), p.clone());
+            move |url: String| -> bool {
+                let lower = url.to_ascii_lowercase();
+                if lower.starts_with("about:") || lower.starts_with("blob:") || lower.starts_with("data:") {
+                    return true;
+                }
+                if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+                    // file://, javascript:, schémas d'applications… refusés.
+                    return false;
+                }
+                if sh.adblock.load(Ordering::Relaxed) && sh.blocker.is_blocked_url(&url) {
+                    let _ = p.send_event(UserEvent::NavBlocked(id, url));
+                    return false;
+                }
+                if lower.starts_with("http://") && sh.https_only.load(Ordering::Relaxed) {
+                    let host = blocker::host_of(&url).unwrap_or("").to_ascii_lowercase();
+                    let allowed = sh.http_allowed.lock().map(|s| s.contains(&host)).unwrap_or(false);
+                    if !is_local_host(&host) && !allowed {
+                        let _ = p.send_event(UserEvent::HttpBlocked(id, url));
+                        return false;
+                    }
+                }
+                true
+            }
+        };
+
+        let perms = sh.block_perms.clone();
+        builder = builder
+            .with_bounds(rect)
+            .with_background_color((18, 16, 25, 255))
+            .with_devtools(cfg!(debug_assertions))
+            .with_autoplay(false)
+            .with_clipboard(true)
+            .with_background_throttling(BackgroundThrottlingPolicy::Suspend)
+            .with_navigation_handler(nav)
+            .with_permission_handler(move |kind| {
+                if !perms.load(Ordering::Relaxed) {
+                    return PermissionResponse::Default;
+                }
+                let _: PermissionKind = kind;
+                PermissionResponse::Deny
+            })
+            .with_new_window_req_handler({
+                let (sh, p) = (sh.clone(), p.clone());
+                move |url, _| {
+                    let lower = url.to_ascii_lowercase();
+                    let ok = (lower.starts_with("https://") || lower.starts_with("http://"))
+                        && !(sh.adblock.load(Ordering::Relaxed) && sh.blocker.is_blocked_url(&url));
+                    if ok {
+                        let _ = p.send_event(UserEvent::OpenTab(url));
+                    }
+                    NewWindowResponse::Deny
+                }
+            })
+            .with_document_title_changed_handler({
+                let p = p.clone();
+                move |t| {
+                    let _ = p.send_event(UserEvent::Title(id, t.chars().take(300).collect()));
+                }
+            })
+            .with_on_page_load_handler({
+                let p = p.clone();
+                move |ev, url| {
+                    let _ = p.send_event(UserEvent::Load(id, matches!(ev, PageLoadEvent::Started), url));
+                }
+            })
+            // Canal minimal depuis les pages web : seulement des compteurs / raccourcis.
+            .with_ipc_handler({
+                let p = p.clone();
+                move |req| {
+                    let b = req.body();
+                    if b.len() > 16 {
+                        return;
+                    }
+                    if let Some(n) = b.strip_prefix("b:").and_then(|n| n.parse::<u32>().ok()) {
+                        let _ = p.send_event(UserEvent::Blocked(id, n.min(100_000)));
+                    } else if let Some(k) = b.strip_prefix("k:") {
+                        if matches!(k, "t" | "w" | "l" | "r" | "n" | "next" | "prev") {
+                            let _ = p.send_event(UserEvent::Key(id, k.to_string()));
+                        }
+                    }
+                }
+            })
+            .with_download_started_handler({
+                let p = p.clone();
+                move |url, path| {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().replace(['/', '\\'], "_"))
+                        .filter(|n| !n.is_empty() && n != "." && n != "..")
+                        .unwrap_or_else(|| "telechargement".into());
+                    if let Some(dir) = dirs::download_dir() {
+                        *path = dir.join(name);
+                    }
+                    let _ = p.send_event(UserEvent::Download(url, false));
+                    true
+                }
+            })
+            .with_download_completed_handler({
+                let p = p.clone();
+                move |url, _, ok| {
+                    let _ = p.send_event(UserEvent::Download(url, ok));
+                }
+            });
+
+        if let Some(html) = home {
+            builder = builder.with_html(html);
+        }
+
+        let Ok(wv) = build(builder, &self.window, #[cfg(target_os = "linux")] &self.fixed) else {
+            return;
+        };
+
+        #[cfg(target_os = "linux")]
+        harden_linux(&wv, &self.settings);
+
+        if url != HOME_URL {
+            let _ = wv.load_url(&url);
+        }
+        self.tabs[idx].wv = Some(wv);
+    }
+
+    fn switch(&mut self, id: u64) {
+        let Some(idx) = self.idx(id) else { return };
+        self.active = Some(id);
+        self.notice = None;
+        if self.tabs[idx].wv.is_none() {
+            self.create_webview(idx);
+        }
+        let r = self.content_rect();
+        for t in &mut self.tabs {
+            if let Some(wv) = &t.wv {
+                if t.id == id {
+                    let _ = wv.set_bounds(r);
+                    let _ = wv.set_visible(true);
+                    let _ = wv.focus();
+                    t.last_active = Instant::now();
+                } else {
+                    let _ = wv.set_visible(false);
+                }
+            }
+        }
+        self.enforce_limits();
+        self.push_state();
+    }
+
+    fn close(&mut self, id: u64) {
+        let Some(idx) = self.idx(id) else { return };
+        let tab = self.tabs.remove(idx);
+        drop(tab.wv); // détruit la WebView et libère la mémoire
+        if self.tabs.is_empty() {
+            self.new_tab(HOME_URL.into(), false);
+            return;
+        }
+        if self.active == Some(id) {
+            let ni = idx.min(self.tabs.len() - 1);
+            let nid = self.tabs[ni].id;
+            self.switch(nid);
+        } else {
+            self.push_state();
+        }
+    }
+
+    fn sleep_tab(&mut self, idx: usize) {
+        if self.tabs[idx].private {
+            return; // un onglet privé mis en veille perdrait sa session
+        }
+        if let Some(wv) = self.tabs[idx].wv.take() {
+            if let Ok(u) = wv.url() {
+                if u.starts_with("http") {
+                    self.tabs[idx].url = u;
+                }
+            }
+            drop(wv);
+            self.tabs[idx].loading = false;
+        }
+    }
+
+    /// Limiteurs façon "Control" : nombre d'onglets vivants, inactivité, RAM.
+    fn enforce_limits(&mut self) {
+        let active = self.active;
+        let mut live: Vec<(Instant, usize)> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.wv.is_some() && Some(t.id) != active && !t.private)
+            .map(|(i, t)| (t.last_active, i))
+            .collect();
+        live.sort();
+
+        let mut to_sleep = Vec::new();
+        let max_bg = self.settings.max_live_tabs.saturating_sub(1);
+        if live.len() > max_bg {
+            to_sleep.extend(live.iter().take(live.len() - max_bg).map(|(_, i)| *i));
+        }
+        if self.settings.hibernate_after_min > 0 {
+            let limit = Duration::from_secs(self.settings.hibernate_after_min * 60);
+            to_sleep.extend(live.iter().filter(|(t, _)| t.elapsed() > limit).map(|(_, i)| *i));
+        }
+        if self.settings.ram_limiter && self.usage.ram_mb > self.settings.ram_limit_mb {
+            if let Some((_, i)) = live.first() {
+                to_sleep.push(*i);
+            }
+        }
+        to_sleep.sort();
+        to_sleep.dedup();
+        for i in to_sleep {
+            self.sleep_tab(i);
+        }
+    }
+
+    fn active_idx(&self) -> Option<usize> {
+        self.active.and_then(|id| self.idx(id))
+    }
+
+    fn active_wv(&self) -> Option<&WebView> {
+        self.active_idx().and_then(|i| self.tabs[i].wv.as_ref())
+    }
+
+    fn navigate_active(&mut self, url: String) {
+        let Some(i) = self.active_idx() else { return };
+        self.notice = None;
+        if url == HOME_URL {
+            // Recrée la vue sur la page d'accueil.
+            self.tabs[i].wv = None;
+            self.tabs[i].url = url;
+            self.tabs[i].title = "Nouvel onglet".into();
+            let id = self.tabs[i].id;
+            self.switch(id);
+            return;
+        }
+        self.tabs[i].url = url.clone();
+        match &self.tabs[i].wv {
+            Some(wv) => {
+                let _ = wv.load_url(&url);
+            }
+            None => {
+                let id = self.tabs[i].id;
+                self.switch(id);
+            }
+        }
+        self.push_state();
+    }
+
+    // -------------------------------------------------------------- événements
+    fn on_event(&mut self, ev: UserEvent) {
+        match ev {
+            UserEvent::Ui(json) => match serde_json::from_str::<UiCmd>(&json) {
+                Ok(cmd) => self.on_ui(cmd),
+                Err(e) => eprintln!("commande UI rejetée : {e}"),
+            },
+            UserEvent::Title(id, t) => {
+                if let Some(i) = self.idx(id) {
+                    if !t.trim().is_empty() {
+                        self.tabs[i].title = t;
+                    }
+                    self.push_state();
+                }
+            }
+            UserEvent::Load(id, started, url) => {
+                if let Some(i) = self.idx(id) {
+                    let t = &mut self.tabs[i];
+                    t.loading = started;
+                    if started {
+                        t.blocked = 0;
+                    }
+                    if url.starts_with("http") {
+                        t.url = url;
+                    }
+                    self.push_state();
+                }
+            }
+            UserEvent::OpenTab(url) => {
+                let private = self.active_idx().is_some_and(|i| self.tabs[i].private);
+                self.new_tab(url, private);
+            }
+            UserEvent::Blocked(id, n) => {
+                if let Some(i) = self.idx(id) {
+                    let old = self.tabs[i].blocked;
+                    if n > old {
+                        self.blocked_total += (n - old) as u64;
+                        self.tabs[i].blocked = n;
+                        self.push_state();
+                    }
+                }
+            }
+            UserEvent::NavBlocked(id, url) => {
+                self.blocked_total += 1;
+                if self.active == Some(id) {
+                    self.notice = Some(serde_json::json!({"kind": "blocked", "url": url}));
+                }
+                self.push_state();
+            }
+            UserEvent::HttpBlocked(id, url) => {
+                if self.active == Some(id) {
+                    self.notice = Some(serde_json::json!({"kind": "http", "url": url}));
+                    self.push_state();
+                }
+            }
+            UserEvent::Download(url, done) => {
+                let kind = if done { "download_done" } else { "download" };
+                self.notice = Some(serde_json::json!({"kind": kind, "url": url}));
+                self.push_state();
+            }
+            UserEvent::Key(id, k) => {
+                if self.active != Some(id) {
+                    return;
+                }
+                match k.as_str() {
+                    "t" => self.new_tab(HOME_URL.into(), false),
+                    "n" => self.new_tab(HOME_URL.into(), true),
+                    "w" => self.close(id),
+                    "r" => {
+                        if let Some(wv) = self.active_wv() {
+                            let _ = wv.reload();
+                        }
+                    }
+                    "l" => {
+                        let _ = self.ui.focus();
+                        let _ = self.ui.evaluate_script("window.fx && fx.focusUrl()");
+                    }
+                    "next" | "prev" => self.cycle(k == "next"),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn cycle(&mut self, forward: bool) {
+        let Some(i) = self.active_idx() else { return };
+        let n = self.tabs.len();
+        let ni = if forward { (i + 1) % n } else { (i + n - 1) % n };
+        let id = self.tabs[ni].id;
+        self.switch(id);
+    }
+
+    fn on_ui(&mut self, cmd: UiCmd) {
+        match cmd {
+            UiCmd::Ready => self.push_state(),
+            UiCmd::Navigate { input } => {
+                let url = self.resolve_input(&input);
+                self.navigate_active(url);
+            }
+            UiCmd::NewTab { private } => self.new_tab(HOME_URL.into(), private),
+            UiCmd::Close { id } => self.close(id),
+            UiCmd::Switch { id } => self.switch(id),
+            UiCmd::Sleep { id } => {
+                if Some(id) != self.active {
+                    if let Some(i) = self.idx(id) {
+                        self.sleep_tab(i);
+                        self.push_state();
+                    }
+                }
+            }
+            UiCmd::Back => {
+                if let Some(wv) = self.active_wv() {
+                    let _ = wv.go_back();
+                }
+            }
+            UiCmd::Forward => {
+                if let Some(wv) = self.active_wv() {
+                    let _ = wv.go_forward();
+                }
+            }
+            UiCmd::Reload => {
+                if let Some(wv) = self.active_wv() {
+                    let _ = wv.reload();
+                }
+            }
+            UiCmd::Home => self.navigate_active(self.resolve_input(&self.settings.home_url.clone())),
+            UiCmd::Panel { name } => {
+                let name = name.filter(|n| matches!(n.as_str(), "control" | "shield" | "settings"));
+                self.panel = if self.panel == name { None } else { name };
+                self.layout();
+                self.push_state();
+            }
+            UiCmd::Settings { settings } => {
+                self.settings = settings.sanitized();
+                self.shared.adblock.store(self.settings.adblock, Ordering::Relaxed);
+                self.shared.https_only.store(self.settings.https_only, Ordering::Relaxed);
+                self.shared.block_perms.store(self.settings.block_permissions, Ordering::Relaxed);
+                self.settings.save();
+                self.enforce_limits();
+                self.push_state();
+            }
+            UiCmd::AllowHttp { url } => {
+                if let Some(host) = blocker::host_of(&url) {
+                    if let Ok(mut s) = self.shared.http_allowed.lock() {
+                        s.insert(host.to_ascii_lowercase());
+                    }
+                    if url.to_ascii_lowercase().starts_with("http://") {
+                        self.navigate_active(url);
+                    }
+                }
+            }
+            UiCmd::ClearData => {
+                for t in &self.tabs {
+                    if let Some(wv) = &t.wv {
+                        let _ = wv.clear_all_browsing_data();
+                        break; // le contexte est partagé
+                    }
+                }
+                self.notice = Some(serde_json::json!({"kind": "cleared", "url": ""}));
+                self.push_state();
+            }
+        }
+    }
+
+    fn tick(&mut self) {
+        self.usage = self.monitor.sample();
+        self.enforce_limits();
+        self.push_state();
+    }
+
+    fn push_state(&self) {
+        let tabs: Vec<_> = self
+            .tabs
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "id": t.id,
+                    "title": t.title,
+                    "url": if t.url == HOME_URL { "" } else { t.url.as_str() },
+                    "active": Some(t.id) == self.active,
+                    "loading": t.loading,
+                    "sleeping": t.wv.is_none(),
+                    "private": t.private,
+                    "blocked": t.blocked,
+                })
+            })
+            .collect();
+        let state = serde_json::json!({
+            "tabs": tabs,
+            "panel": self.panel,
+            "settings": self.settings,
+            "usage": {"ram": self.usage.ram_mb, "cpu": self.usage.cpu_pct, "procs": self.usage.procs},
+            "blocked_total": self.blocked_total,
+            "blocklist": self.shared.blocker.len(),
+            "notice": self.notice,
+            "layout": {"top": TOP_H, "side": SIDE_W, "panel": PANEL_W},
+        });
+        // serde_json produit un littéral JS sûr : aucune injection possible.
+        let _ = self.ui.evaluate_script(&format!("window.fx && fx.render({state})"));
+    }
+}
+
+/// Réglages WebKitGTK supplémentaires (Linux).
+#[cfg(target_os = "linux")]
+fn harden_linux(wv: &WebView, s: &Settings) {
+    use webkit2gtk::{CacheModel, SettingsExt, WebContextExt, WebViewExt, WebsiteDataManagerExt};
+    use wry::WebViewExtUnix;
+    let wk = wv.webview();
+    if let Some(st) = WebViewExt::settings(&wk) {
+        st.set_enable_dns_prefetching(false);
+        st.set_javascript_can_open_windows_automatically(false);
+        st.set_enable_page_cache(false); // économise la RAM
+        st.set_enable_webgl(!s.anti_fingerprint);
+        st.set_enable_webaudio(!s.anti_fingerprint);
+        st.set_enable_media_stream(!s.block_permissions);
+        st.set_enable_developer_extras(cfg!(debug_assertions));
+        st.set_allow_file_access_from_file_urls(false);
+        st.set_allow_universal_access_from_file_urls(false);
+    }
+    if let Some(ctx) = wk.context() {
+        ctx.set_cache_model(CacheModel::DocumentBrowser);
+        if let Some(dm) = ctx.website_data_manager() {
+            dm.set_itp_enabled(true); // Intelligent Tracking Prevention
+        }
+    }
+}
+
+/// Signaux de vie privée + raccourcis clavier relayés depuis les pages.
+const PRIVACY_SCRIPT: &str = r#"(() => {
+  try { Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get: () => true, configurable: true }); } catch (_) {}
+  try { Object.defineProperty(Navigator.prototype, 'doNotTrack', { get: () => '1', configurable: true }); } catch (_) {}
+  if (window.top !== window) return;
+  addEventListener('keydown', (e) => {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return;
+    const k = e.key.toLowerCase();
+    let c = null;
+    if (k === 'tab') c = e.shiftKey ? 'prev' : 'next';
+    else if (!e.shiftKey && ['t','w','l','r'].includes(k)) c = k;
+    else if (e.shiftKey && k === 'n') c = 'n';
+    if (c && window.ipc) { e.preventDefault(); e.stopPropagation(); window.ipc.postMessage('k:' + c); }
+  }, true);
+})();"#;
+
+#[cfg(test)]
+mod tests {
+    use super::percent_encode;
+
+    #[test]
+    fn encode() {
+        assert_eq!(percent_encode("rust lang&x"), "rust+lang%26x");
+        assert_eq!(percent_encode("é"), "%C3%A9");
+    }
+}

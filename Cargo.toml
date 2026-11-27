@@ -1,0 +1,25 @@
+[package]
+name = "ferrox"
+version = "0.1.0"
+edition = "2024"
+description = "Ferrox — navigateur web gaming léger et sécurisé, écrit en Rust"
+license = "MIT"
+
+[dependencies]
+dirs = "7.0.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
+tao = "0.38.0"
+wry = "0.58.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.19"
+webkit2gtk = { version = "3.0", features = ["v2_40"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<title>Ferrox</title>
+<style>
+:root {
+  --accent: #fa1e4e;
+  --bg: #0d0b12;
+  --bg2: #15121d;
+  --bg3: #1e1a29;
+  --line: #2a2438;
+  --text: #ece8f4;
+  --dim: #8d86a0;
+  --top: 84px; --side: 56px; --panel: 320px;
+  --glow: 0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+  font: 13px/1.4 "Inter", "Segoe UI", "Cantarell", system-ui, sans-serif; user-select: none; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- Barre latérale ---------- */
+#side { position: fixed; left: 0; top: 0; bottom: 0; width: var(--side); background: var(--bg);
+  border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 6px; }
+#logo { width: 34px; height: 34px; margin-bottom: 12px; display: grid; place-items: center;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); background: var(--accent); box-shadow: var(--glow);
+  font-weight: 900; font-size: 17px; color: #fff; letter-spacing: -1px; }
+.sbtn { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; color: var(--dim); position: relative; transition: .15s; }
+.sbtn:hover { color: var(--text); background: var(--bg3); }
+.sbtn.on { color: var(--accent); background: var(--bg3); }
+.sbtn.on::before { content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--accent); box-shadow: var(--glow); }
+.sbtn svg { width: 20px; height: 20px; }
+#side .grow { flex: 1; }
+#mini { font-size: 10px; color: var(--dim); text-align: center; line-height: 1.25; font-variant-numeric: tabular-nums; }
+#mini b { color: var(--text); display: block; font-size: 11px; }
+
+/* ---------- Onglets ---------- */
+#top { position: fixed; left: var(--side); right: 0; top: 0; height: var(--top); background: var(--bg); }
+#tabs { height: 38px; display: flex; align-items: flex-end; padding: 0 8px; gap: 2px; overflow: hidden; }
+.tab { height: 32px; min-width: 60px; max-width: 220px; flex: 1 1 200px; display: flex; align-items: center; gap: 8px;
+  padding: 0 8px 0 14px; background: var(--bg2); color: var(--dim); cursor: pointer; position: relative;
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 100%, 0 100%); transition: background .15s; }
+.tab:hover { background: var(--bg3); color: var(--text); }
+.tab.active { background: var(--bg3); color: var(--text); }
+.tab.active::after { content: ""; position: absolute; left: 8px; right: 8px; top: 0; height: 2px; background: var(--accent); box-shadow: var(--glow); }
+.tab.sleeping { opacity: .55; }
+.tab.private { background: linear-gradient(90deg, #2a1640, var(--bg2)); }
+.tab .t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab .ic { width: 14px; height: 14px; flex: none; display: grid; place-items: center; }
+.tab .ic svg { width: 13px; height: 13px; }
+.tab .x { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; opacity: .6; flex: none; }
+.tab .x:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.tab .x svg { width: 12px; height: 12px; }
+.spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+#newtab { width: 32px; height: 32px; flex: none; display: grid; place-items: center; color: var(--dim); border-radius: 8px; margin-bottom: 0; }
+#newtab:hover { color: var(--accent); background: var(--bg2); }
+
+/* ---------- Barre d'outils ---------- */
+#bar { height: 46px; display: flex; align-items: center; gap: 4px; padding: 0 10px; background: var(--bg3); border-bottom: 1px solid var(--line); }
+.nb { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--dim); }
+.nb:hover { color: var(--text); background: var(--bg2); }
+#urlbox { flex: 1; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; margin: 0 6px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; transition: .15s; }
+#urlbox:focus-within { border-color: var(--accent); box-shadow: var(--glow); }
+#lock { color: #3ddc97; display: grid; } #lock.insecure { color: #ffb020; }
+#lock svg { width: 14px; height: 14px; }
+#url { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; user-select: text; }
+#url::placeholder { color: var(--dim); }
+#shieldbadge { display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 6px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 700; font-size: 12px; font-variant-numeric: tabular-nums; }
+#shieldbadge svg { width: 14px; height: 14px; }
+#notice { display: none; align-items: center; gap: 8px; max-width: 46%; height: 28px; padding: 0 6px 0 10px; border-radius: 6px;
+  background: #2b1d10; color: #ffcf8a; font-size: 12px; white-space: nowrap; }
+#notice.show { display: flex; }
+#notice span { overflow: hidden; text-overflow: ellipsis; }
+#notice button { padding: 3px 8px; border-radius: 5px; background: #ffb02033; font-size: 11px; }
+#notice button:hover { background: #ffb02066; }
+
+/* ---------- Panneau ---------- */
+#panel { position: fixed; left: var(--side); top: var(--top); bottom: 0; width: var(--panel); background: var(--bg2);
+  border-right: 1px solid var(--line); padding: 18px; overflow-y: auto; display: none; }
+#panel.show { display: block; }
+#panel h2 { font-size: 13px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+#panel h2::before { content: ""; width: 4px; height: 16px; background: var(--accent); box-shadow: var(--glow); }
+#panel h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1.5px; margin: 20px 0 10px; }
+.card { background: var(--bg3); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+.gauge { display: flex; align-items: center; gap: 14px; }
+.ring { width: 74px; height: 74px; flex: none; position: relative; }
+.ring svg { width: 74px; height: 74px; transform: rotate(-90deg); }
+.ring circle { stroke-width: 7; fill: none; }
+.ring .bgc { stroke: var(--line); }
+.ring .fg { stroke: var(--accent); filter: drop-shadow(0 0 4px var(--accent)); transition: stroke-dashoffset .6s; }
+.ring b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 14px; font-variant-numeric: tabular-nums; }
+.gauge .lbl { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
+.gauge .val { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; }
+.row + .row { border-top: 1px solid var(--line); }
+.row small { display: block; color: var(--dim); font-size: 11px; }
+.sw { width: 38px; height: 22px; border-radius: 11px; background: var(--line); position: relative; flex: none; transition: .15s; }
+.sw::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--dim); transition: .15s; }
+.sw.on { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+.sw.on::after { left: 19px; background: var(--accent); box-shadow: var(--glow); }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+select, .txt { width: 100%; height: 32px; padding: 0 10px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; font: inherit; outline: 0; }
+.big { font-size: 34px; font-weight: 900; color: var(--accent); text-shadow: var(--glow); font-variant-numeric: tabular-nums; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch { width: 30px; height: 30px; border-radius: 8px; border: 2px solid transparent; }
+.swatch.on { border-color: var(--text); }
+.btn { width: 100%; height: 34px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); margin-top: 6px; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.tlist .row { font-size: 12px; }
+.tlist .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.pill { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--line); color: var(--dim); flex: none; }
+.pill.live { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.mini-btn { font-size: 11px; color: var(--dim); padding: 2px 6px; border-radius: 4px; }
+.mini-btn:hover { color: var(--accent); }
+#bg { position: fixed; left: var(--side); top: var(--top); right: 0; bottom: 0; background: var(--bg); }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+
+<nav id="side">
+  <div id="logo">Fx</div>
+  <button class="sbtn" data-panel="control" title="Control — RAM / CPU">
+    <svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/><circle cx="12" cy="12" r="3"/></svg>
+  </button>
+  <button class="sbtn" data-panel="shield" title="Bouclier — bloqueur & vie privée">
+    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+  </button>
+  <button class="sbtn" data-panel="settings" title="Paramètres">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+  <div class="grow"></div>
+  <button class="sbtn" id="privbtn" title="Onglet privé (Ctrl+Maj+N)">
+    <svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><path d="M3 3l18 18"/></svg>
+  </button>
+  <div id="mini"><b id="miniram">–</b>Mo RAM</div>
+</nav>
+
+<header id="top">
+  <div id="tabs"></div>
+  <div id="bar">
+    <button class="nb" id="back" title="Précédent"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <button class="nb" id="fwd" title="Suivant"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+    <button class="nb" id="reload" title="Recharger (Ctrl+R)"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+    <button class="nb" id="home" title="Accueil"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></button>
+    <div id="urlbox">
+      <span id="lock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+      <input id="url" spellcheck="false" autocomplete="off" placeholder="Rechercher ou saisir une adresse">
+    </div>
+    <div id="notice"><span id="noticetxt"></span><button id="noticeact"></button><button id="noticex">✕</button></div>
+    <div id="shieldbadge" title="Éléments bloqués sur cette page">
+      <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span id="pageblocked">0</span>
+    </div>
+  </div>
+</header>
+
+<aside id="panel"></aside>
+
+<script>
+'use strict';
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const send = (o) => window.ipc.postMessage(JSON.stringify(o));
+  const h = (tag, props = {}, ...kids) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') e.className = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else e.setAttribute(k, v);
+    }
+    for (const k of kids) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+    return e;
+  };
+  const icon = (d) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24');
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.append(p); return s; };
+  const ICON_X = 'M18 6L6 18M6 6l12 12', ICON_MOON = 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
+        ICON_GLOBE = 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
+        ICON_EYE = 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM3 3l18 18';
+
+  let S = null, editingUrl = false;
+
+  // --------- Onglets
+  function renderTabs() {
+    const box = $('#tabs'); box.replaceChildren();
+    for (const t of S.tabs) {
+      const ic = h('span', { class: 'ic' });
+      if (t.loading) ic.append(h('span', { class: 'spin' }));
+      else ic.append(icon(t.sleeping ? ICON_MOON : t.private ? ICON_EYE : ICON_GLOBE));
+      const el = h('div', {
+        class: 'tab' + (t.active ? ' active' : '') + (t.sleeping ? ' sleeping' : '') + (t.private ? ' private' : ''),
+        title: t.title + (t.sleeping ? ' (en veille)' : ''),
+        onmousedown: (e) => { if (e.button === 1) { e.preventDefault(); send({ cmd: 'close', id: t.id }); } },
+        onclick: () => send({ cmd: 'switch', id: t.id }),
+      }, ic, h('span', { class: 't' }, t.title || 'Sans titre'),
+         h('button', { class: 'x', title: 'Fermer (Ctrl+W)', onclick: (e) => { e.stopPropagation(); send({ cmd: 'close', id: t.id }); } }, icon(ICON_X)));
+      box.append(el);
+    }
+    box.append(h('button', { id: 'newtab', title: 'Nouvel onglet (Ctrl+T)', onclick: () => send({ cmd: 'new_tab', private: false }) }, icon('M12 5v14M5 12h14')));
+  }
+
+  // --------- Barre
+  function renderBar() {
+    const t = S.tabs.find((x) => x.active) || {};
+    if (!editingUrl) $('#url').value = t.url || '';
+    const lock = $('#lock');
+    lock.classList.toggle('insecure', !!t.url && !t.url.startsWith('https://'));
+    lock.style.opacity = t.url ? 1 : .35;
+    lock.title = t.url && t.url.startsWith('https://') ? 'Connexion chiffrée (HTTPS)' : 'Connexion non chiffrée';
+    $('#pageblocked').textContent = t.blocked || 0;
+    $('#miniram').textContent = S.usage.ram || '–';
+    const n = S.notice, nb = $('#notice');
+    nb.classList.toggle('show', !!n);
+    if (n) {
+      const act = $('#noticeact'); act.style.display = 'none'; act.onclick = null;
+      let host = ''; try { host = new URL(n.url).host; } catch (_) { host = n.url; }
+      if (n.kind === 'http') {
+        $('#noticetxt').textContent = 'HTTP non sécurisé bloqué : ' + host;
+        act.textContent = 'Autoriser ce site'; act.style.display = '';
+        act.onclick = () => send({ cmd: 'allow_http', url: n.url });
+      } else if (n.kind === 'blocked') $('#noticetxt').textContent = 'Traqueur bloqué : ' + host;
+      else if (n.kind === 'download') $('#noticetxt').textContent = 'Téléchargement en cours…';
+      else if (n.kind === 'download_done') $('#noticetxt').textContent = 'Téléchargement terminé (dossier Téléchargements)';
+      else if (n.kind === 'cleared') $('#noticetxt').textContent = 'Données de navigation effacées';
+    }
+    document.querySelectorAll('.sbtn[data-panel]').forEach((b) => b.classList.toggle('on', b.dataset.panel === S.panel));
+  }
+
+  // --------- Panneaux
+  const ring = (pct, label) => {
+    const C = 2 * Math.PI * 30, v = Math.max(0, Math.min(1, pct));
+    const wrap = h('div', { class: 'ring' });
+    wrap.innerHTML = `<svg viewBox="0 0 74 74"><circle class="bgc" cx="37" cy="37" r="30"/><circle class="fg" cx="37" cy="37" r="30" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - v)}"/></svg>`;
+    wrap.append(h('b', {}, label));
+    return wrap;
+  };
+  const toggle = (key, title, sub) => h('div', { class: 'row' },
+    h('div', {}, title, h('small', {}, sub)),
+    h('button', { class: 'sw' + (S.settings[key] ? ' on' : ''), onclick: () => setS({ [key]: !S.settings[key] }) }));
+  const slider = (key, title, min, max, step, fmt) => {
+    const out = h('span', { class: 'pill live' }, fmt(S.settings[key]));
+    const inp = h('input', { type: 'range', min, max, step });
+    inp.value = S.settings[key];
+    inp.addEventListener('input', () => { out.textContent = fmt(+inp.value); });
+    inp.addEventListener('change', () => setS({ [key]: +inp.value }));
+    return h('div', { class: 'row', style: 'display:block' }, h('div', { class: 'row', style: 'padding:0 0 6px' }, h('span', {}, title), out), inp);
+  };
+  const setS = (patch) => send({ cmd: 'settings', settings: { ...S.settings, ...patch } });
+
+  function panelControl(p) {
+    const lim = S.settings.ram_limit_mb, ram = S.usage.ram;
+    p.append(h('h2', {}, 'Control'),
+      h('div', { class: 'card gauge' }, ring(ram / lim, Math.round(100 * ram / lim) + '%'),
+        h('div', {}, h('div', { class: 'lbl' }, 'Mémoire'), h('div', { class: 'val' }, ram + ' Mo'), h('small', { style: 'color:var(--dim)' }, 'limite ' + lim + ' Mo'))),
+      h('div', { class: 'card gauge' }, ring(S.usage.cpu / 100, Math.round(S.usage.cpu) + '%'),
+        h('div', {}, h('div', { class: 'lbl' }, 'Processeur'), h('div', { class: 'val' }, S.usage.cpu.toFixed(1) + ' %'), h('small', { style: 'color:var(--dim)' }, S.usage.procs + ' processus'))),
+      h('h3', {}, 'Limiteur de RAM'),
+      h('div', { class: 'card' },
+        toggle('ram_limiter', 'Limiteur actif', 'Met en veille les onglets en arrière-plan'),
+        slider('ram_limit_mb', 'Limite', 256, 8192, 128, (v) => v + ' Mo'),
+        slider('max_live_tabs', 'Onglets actifs max', 1, 20, 1, (v) => v),
+        slider('hibernate_after_min', 'Veille après inactivité', 0, 60, 1, (v) => v ? v + ' min' : 'jamais')),
+      h('h3', {}, 'Onglets'));
+    const list = h('div', { class: 'card tlist' });
+    for (const t of S.tabs) list.append(h('div', { class: 'row' }, h('span', {}, t.title),
+      h('span', { class: 'pill' + (t.sleeping ? '' : ' live') }, t.sleeping ? 'veille' : 'actif'),
+      (!t.active && !t.sleeping && !t.private) ? h('button', { class: 'mini-btn', onclick: () => send({ cmd: 'sleep', id: t.id }) }, 'Endormir') : ''));
+    p.append(list);
+  }
+
+  function panelShield(p) {
+    p.append(h('h2', {}, 'Bouclier'),
+      h('div', { class: 'card' }, h('div', { class: 'big' }, S.blocked_total.toLocaleString('fr-FR')),
+        h('small', { style: 'color:var(--dim)' }, 'publicités & traqueurs bloqués cette session · ' + S.blocklist.toLocaleString('fr-FR') + ' domaines en liste')),
+      h('div', { class: 'card' },
+        toggle('adblock', 'Bloqueur pubs & traqueurs', 'S\'applique aux pages rechargées'),
+        toggle('https_only', 'Mode HTTPS uniquement', 'Bloque les connexions non chiffrées'),
+        toggle('block_permissions', 'Bloquer caméra / micro / position', 'Refus automatique des permissions'),
+        toggle('anti_fingerprint', 'Anti-empreinte strict', 'Désactive WebGL et WebAudio')),
+      h('div', { class: 'card' }, h('small', { style: 'color:var(--dim)' },
+        'Toujours actifs : Global Privacy Control, Do-Not-Track, pas de préchargement DNS, popups → onglets, schémas file:// et javascript: refusés, ITP (Linux), processus web isolés (sandbox bubblewrap si installé).')),
+      h('button', { class: 'btn', onclick: () => send({ cmd: 'clear_data' }) }, 'Effacer cookies & données de navigation'));
+  }
+
+  function panelSettings(p) {
+    const colors = ['#fa1e4e', '#a855f7', '#22d3ee', '#3ddc97', '#ff8a00', '#f5f5f5'];
+    const sw = h('div', { class: 'swatches' });
+    for (const c of colors) sw.append(h('button', { class: 'swatch' + (S.settings.accent === c ? ' on' : ''), style: 'background:' + c, onclick: () => setS({ accent: c }) }));
+    const engines = { 'DuckDuckGo': 'https://duckduckgo.com/?q={}', 'Brave Search': 'https://search.brave.com/search?q={}', 'Startpage': 'https://www.startpage.com/do/search?q={}', 'Qwant': 'https://www.qwant.com/?q={}', 'Google': 'https://www.google.com/search?q={}' };
+    const sel = h('select', { onchange: (e) => setS({ search_url: e.target.value }) });
+    for (const [n, u] of Object.entries(engines)) { const o = h('option', { value: u }, n); if (u === S.settings.search_url) o.selected = true; sel.append(o); }
+    const home = h('input', { class: 'txt', placeholder: 'ferrox://home ou https://…' });
+    home.value = S.settings.home_url;
+    home.addEventListener('change', () => setS({ home_url: home.value.trim() || 'ferrox://home' }));
+    p.append(h('h2', {}, 'Paramètres'),
+      h('h3', {}, 'Couleur d\'accent'), h('div', { class: 'card' }, sw),
+      h('h3', {}, 'Moteur de recherche'), h('div', { class: 'card' }, sel),
+      h('h3', {}, 'Page d\'accueil'), h('div', { class: 'card' }, home),
+      h('h3', {}, 'Raccourcis'),
+      h('div', { class: 'card' }, ...[['Ctrl+T', 'Nouvel onglet'], ['Ctrl+Maj+N', 'Onglet privé'], ['Ctrl+W', 'Fermer l\'onglet'], ['Ctrl+L', 'Barre d\'adresse'], ['Ctrl+R', 'Recharger'], ['Ctrl+Tab', 'Onglet suivant']]
+        .map(([k, d]) => h('div', { class: 'row' }, h('span', {}, d), h('span', { class: 'pill' }, k)))));
+  }
+
+  function renderPanel() {
+    const p = $('#panel');
+    const active = document.activeElement;
+    if (active && p.contains(active) && active.matches('input, select')) return; // ne pas casser une saisie en cours
+    p.classList.toggle('show', !!S.panel);
+    p.replaceChildren();
+    if (S.panel === 'control') panelControl(p);
+    else if (S.panel === 'shield') panelShield(p);
+    else if (S.panel === 'settings') panelSettings(p);
+  }
+
+  window.fx = {
+    render(state) {
+      S = state;
+      document.documentElement.style.setProperty('--accent', S.settings.accent);
+      document.documentElement.style.setProperty('--top', S.layout.top + 'px');
+      document.documentElement.style.setProperty('--side', S.layout.side + 'px');
+      document.documentElement.style.setProperty('--panel', S.layout.panel + 'px');
+      renderTabs(); renderBar(); renderPanel();
+    },
+    focusUrl() { const u = $('#url'); u.focus(); u.select(); },
+  };
+
+  // --------- Interactions
+  const url = $('#url');
+  url.addEventListener('focus', () => { editingUrl = true; setTimeout(() => url.select(), 0); });
+  url.addEventListener('blur', () => { editingUrl = false; if (S) renderBar(); });
+  url.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { send({ cmd: 'navigate', input: url.value }); url.blur(); }
+    if (e.key === 'Escape') url.blur();
+  });
+  $('#back').onclick = () => send({ cmd: 'back' });
+  $('#fwd').onclick = () => send({ cmd: 'forward' });
+  $('#reload').onclick = () => send({ cmd: 'reload' });
+  $('#home').onclick = () => send({ cmd: 'home' });
+  $('#privbtn').onclick = () => send({ cmd: 'new_tab', private: true });
+  $('#shieldbadge').onclick = () => send({ cmd: 'panel', name: 'shield' });
+  $('#noticex').onclick = () => { $('#notice').classList.remove('show'); };
+  document.querySelectorAll('.sbtn[data-panel]').forEach((b) => b.onclick = () => send({ cmd: 'panel', name: b.dataset.panel }));
+  addEventListener('keydown', (e) => {
+    if (!e.ctrlKey) return;
+    const k = e.key.toLowerCase();
+    if (k === 't' && !e.shiftKey) { e.preventDefault(); send({ cmd: 'new_tab', private: false }); }
+    if (k === 'n' && e.shiftKey) { e.preventDefault(); send({ cmd: 'new_tab', private: true }); }
+    if (k === 'l') { e.preventDefault(); fx.focusUrl(); }
+    if (k === 'r') { e.preventDefault(); send({ cmd: 'reload' }); }
+    if (k === 'w') { e.preventDefault(); const t = S && S.tabs.find((x) => x.active); if (t) send({ cmd: 'close', id: t.id }); }
+  });
+  addEventListener('contextmenu', (e) => { if (e.target !== url) e.preventDefault(); });
+  send({ cmd: 'ready' });
+})();
+</script>
+</body>
+</html>
