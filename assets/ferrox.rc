@@ -1,8 +1,8 @@
 1 ICON "ferrox.ico"
 
 1 VERSIONINFO
-FILEVERSION     0,6,5,0
-PRODUCTVERSION  0,6,5,0
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
 FILEOS          0x40004
 FILETYPE        0x1
 BEGIN
@@ -12,11 +12,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName",      "Ferrox"
       VALUE "FileDescription",  "Ferrox"
-      VALUE "FileVersion",      "0.6.5"
+      VALUE "FileVersion",      "1.0.0"
       VALUE "InternalName",     "ferrox"
       VALUE "OriginalFilename", "Ferrox.exe"
       VALUE "ProductName",      "Ferrox"
-      VALUE "ProductVersion",   "0.6.5"
+      VALUE "ProductVersion",   "1.0.0"
       VALUE "LegalCopyright",   "Licence MIT"
     END
   END

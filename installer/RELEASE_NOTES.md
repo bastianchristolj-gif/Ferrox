@@ -1,14 +1,14 @@
-## Ferrox 0.6.5
+## Ferrox V1
 
-Navigateur web léger et sécurisé pour Windows 10/11, écrit en Rust, au style « gaming ».
+Première version publique de Ferrox : un navigateur web léger et sécurisé pour Windows 10/11, écrit en Rust, au style « gaming ».
 
 ### Installation
-- **`Ferrox-Setup-0.6.5.exe`** : installateur. Aucun droit administrateur n'est demandé. Il crée un raccourci dans le menu Démarrer et, en option, sur le bureau, et se désinstalle depuis « Applications installées ».
-- **`Ferrox-0.6.5-windows.zip`** : contient l'installateur, une version portable (sans installation) et les empreintes SHA-256.
+- **`Ferrox-Setup-1.0.0.exe`** : installateur. Aucun droit administrateur n'est demandé. Il crée un raccourci dans le menu Démarrer et, en option, sur le bureau, et se désinstalle depuis « Applications installées ».
+- **`Ferrox-1.0.0-windows.zip`** : contient l'installateur, une version portable (sans installation) et les empreintes SHA-256.
 
 > Les fichiers ne sont pas signés numériquement. Au premier lancement, Windows peut afficher « Windows a protégé votre ordinateur » : cliquez sur *Informations complémentaires*, puis *Exécuter quand même*.
 >
-> Pour vérifier un fichier, comparez la sortie de `certutil -hashfile Ferrox-Setup-0.6.5.exe SHA256` avec `SHA256SUMS.txt`.
+> Pour vérifier un fichier, comparez la sortie de `certutil -hashfile Ferrox-Setup-1.0.0.exe SHA256` avec `SHA256SUMS.txt`.
 
 ### Fonctionnalités
 - **Control**
