@@ -21,6 +21,18 @@ Le binaire release fait environ **1,2 Mo**.
 
 Apparence (6 thèmes, couleur d'accent, animations, RAM, fond animé) · moteur de recherche · page d'accueil et **restauration de session** · confidentialité (bloqueur, HTTPS uniquement, permissions, anti-empreinte, Ne pas me pister, effacement à la fermeture) · performances (limiteur de RAM, veille) · onglets (position, fermeture au dernier onglet, zoom par défaut) · saisie automatique et mots de passe · lecture automatique des vidéos · dossier de téléchargement · accélération matérielle · redémarrage · réinitialisation.
 
+### Historique (`ferrox://history`, Ctrl+H)
+
+Les visites sont regroupées par jour et l'historique se recherche. Tu peux supprimer une visite, plusieurs visites cochées, toutes les visites d'un site, ou une période (dernière heure, 24 h, 7 jours, 4 semaines, tout). L'enregistrement peut être mis en pause. Les onglets privés ne sont jamais enregistrés. L'historique est stocké localement dans `history.jsonl`.
+
+### Control (vraies mesures)
+
+Le panneau affiche :
+- la RAM et le CPU de Ferrox, et sa part dans la mémoire de l'ordinateur ;
+- la répartition par rôle : pages web, moteur, carte graphique, réseau, extensions ;
+- la RAM de chaque onglet (sous Windows, via l'API WebView2) ;
+- les compteurs d'onglets en mémoire et en veille.
+
 ### uBlock Origin
 
 Au premier lancement sous Windows, Ferrox installe automatiquement **uBlock Origin Lite** depuis le Chrome Web Store. uBlock Origin « classique » (Manifest V2) n'est plus accepté par le moteur d'Edge (WebView2). La version Lite (Manifest V3) est faite par le même auteur. D'autres extensions recommandées s'installent en un clic depuis la page *Extensions*.

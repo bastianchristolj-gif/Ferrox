@@ -3,6 +3,42 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Raccourci de la page Nouvel onglet.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Tile {
+    pub name: String,
+    pub url: String,
+}
+
+fn default_tiles() -> Vec<Tile> {
+    [
+        ("YouTube", "https://www.youtube.com"),
+        ("Twitch", "https://www.twitch.tv"),
+        ("Steam", "https://store.steampowered.com"),
+        ("Reddit", "https://www.reddit.com"),
+        ("Discord", "https://discord.com/app"),
+        ("Epic Games", "https://store.epicgames.com"),
+        ("Wikipédia", "https://fr.wikipedia.org"),
+        ("GitHub", "https://github.com"),
+    ]
+    .iter()
+    .map(|(n, u)| Tile { name: n.to_string(), url: u.to_string() })
+    .collect()
+}
+
+pub fn sanitize_tiles(tiles: Vec<Tile>) -> Vec<Tile> {
+    tiles
+        .into_iter()
+        .filter(|t| t.url.starts_with("https://") && t.url.len() <= 400 && crate::blocker::host_of(&t.url).is_some())
+        .map(|t| {
+            let name: String = t.name.trim().chars().filter(|c| !c.is_control()).take(40).collect();
+            let name = if name.is_empty() { crate::blocker::host_of(&t.url).unwrap_or("").trim_start_matches("www.").to_string() } else { name };
+            Tile { name, url: t.url }
+        })
+        .take(16)
+        .collect()
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -16,6 +52,12 @@ pub struct Settings {
     pub wallpaper: bool,
     /// Affiche la RAM utilisée dans la barre d'outils.
     pub show_ram: bool,
+    /// Raccourcis de la page Nouvel onglet.
+    pub home_tiles: Vec<Tile>,
+    /// Icônes des sites via le service de DuckDuckGo quand le site n'en fournit pas.
+    pub site_icons: bool,
+    /// Enregistre l'historique de navigation.
+    pub history_enabled: bool,
     // --- Onglets / démarrage ---
     /// Rouvre les onglets de la session précédente au démarrage.
     pub restore_session: bool,
@@ -73,6 +115,9 @@ impl Default for Settings {
             animations: true,
             wallpaper: true,
             show_ram: true,
+            home_tiles: default_tiles(),
+            site_icons: true,
+            history_enabled: true,
             restore_session: false,
             quit_on_last_tab: true,
             new_tab_next: true,
@@ -160,6 +205,7 @@ impl Settings {
             self.home_url = d.home_url.clone();
         }
         self.default_zoom = self.default_zoom.clamp(50, 250);
+        self.home_tiles = sanitize_tiles(std::mem::take(&mut self.home_tiles));
         if !self.download_dir.is_empty() && !std::path::Path::new(&self.download_dir).is_dir() {
             self.download_dir.clear();
         }

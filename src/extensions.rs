@@ -312,6 +312,86 @@ pub mod wv2 {
         }
     }
 
+    /// Icône officielle du site (fournie par le moteur).
+    pub fn on_favicon(wv: &wry::WebView, cb: impl Fn(String) + 'static) {
+        let Ok(w15) = wv.webview().cast::<ICoreWebView2_15>() else { return };
+        let handler = webview2_com::FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+            if let Some(w) = sender.and_then(|s| s.cast::<ICoreWebView2_15>().ok()) {
+                let mut p = PWSTR::null();
+                unsafe {
+                    if w.FaviconUri(&mut p).is_ok() {
+                        let u = take_pwstr(p);
+                        if !u.is_empty() {
+                            cb(u);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        unsafe {
+            let _ = w15.add_FaviconChanged(&handler, &mut token);
+        }
+    }
+
+    /// Identifiant du cadre principal d'une vue (pour relier un onglet à son processus).
+    pub fn main_frame_id(wv: &wry::WebView) -> Option<u32> {
+        let w = wv.webview().cast::<ICoreWebView2_20>().ok()?;
+        let mut id = 0u32;
+        unsafe { w.FrameId(&mut id).ok()? };
+        Some(id)
+    }
+
+    /// Processus de rendu et cadres principaux qu'ils affichent : (pid, [frame ids]).
+    pub fn renderer_frames(wv: &wry::WebView, cb: impl FnOnce(Vec<(u32, Vec<u32>)>) + 'static) {
+        let Ok(env) = wv.environment().cast::<ICoreWebView2Environment13>() else { return };
+        let handler = webview2_com::GetProcessExtendedInfosCompletedHandler::create(Box::new(move |hr, list| {
+            let mut out = Vec::new();
+            if let (Ok(()), Some(list)) = (hr, list) {
+                unsafe {
+                    let mut n = 0u32;
+                    let _ = list.Count(&mut n);
+                    for i in 0..n {
+                        let Ok(info) = list.GetValueAtIndex(i) else { continue };
+                        let Ok(pi) = info.ProcessInfo() else { continue };
+                        let mut pid = 0i32;
+                        let _ = pi.ProcessId(&mut pid);
+                        let mut frames = Vec::new();
+                        if let Ok(coll) = info.AssociatedFrameInfos() {
+                            if let Ok(it) = coll.GetIterator() {
+                                let mut has = BOOL::default();
+                                let _ = it.HasCurrent(&mut has);
+                                while has.as_bool() {
+                                    if let Ok(f) = it.GetCurrent().and_then(|f| f.cast::<ICoreWebView2FrameInfo2>()) {
+                                        // cadre principal = sans parent
+                                        if f.ParentFrameInfo().is_err() {
+                                            let mut fid = 0u32;
+                                            if f.FrameId(&mut fid).is_ok() {
+                                                frames.push(fid);
+                                            }
+                                        }
+                                    }
+                                    if it.MoveNext(&mut has).is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if !frames.is_empty() {
+                            out.push((pid as u32, frames));
+                        }
+                    }
+                }
+            }
+            cb(out);
+            Ok(())
+        }));
+        unsafe {
+            let _ = env.GetProcessExtendedInfos(&handler);
+        }
+    }
+
     fn ext_id(e: &ICoreWebView2BrowserExtension) -> String {
         let mut p = PWSTR::null();
         unsafe { if e.Id(&mut p).is_ok() { take_pwstr(p) } else { String::new() } }

@@ -14,6 +14,7 @@
 mod blocker;
 mod config;
 mod extensions;
+mod history;
 mod monitor;
 
 use blocker::Blocker;
@@ -46,12 +47,14 @@ const HOME_HTML: &str = include_str!("../ui/home.html");
 const HOME_URL: &str = "ferrox://home";
 const SETTINGS_URL: &str = "ferrox://settings";
 const EXT_URL: &str = "ferrox://extensions";
+const HISTORY_URL: &str = "ferrox://history";
 
 /// Pages internes dessinées par l'interface elle-même (aucune WebView web).
 fn internal_page(url: &str) -> Option<&'static str> {
     match url {
         SETTINGS_URL => Some("settings"),
         EXT_URL => Some("extensions"),
+        HISTORY_URL => Some("history"),
         _ => None,
     }
 }
@@ -81,6 +84,8 @@ enum UserEvent {
     ExtList(Vec<(String, String, bool)>),
     ExtChanged(Option<String>, bool),
     Favicon(u64, String),
+    Renderers(Vec<(u32, Vec<u32>)>),
+    HomeTiles(u64, Vec<config::Tile>),
     Fullscreen(u64, bool),
     ClosePopup,
 }
@@ -120,6 +125,10 @@ enum UiCmd {
     Restart,
     ResetSettings,
     OpenDownloads,
+    HistoryQuery { q: String, offset: usize },
+    HistoryDelete { ids: Vec<u64> },
+    HistoryDeleteHost { host: String },
+    HistoryClear { range: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +148,8 @@ struct Tab {
     zoom: u32,
     can_back: bool,
     can_fwd: bool,
+    /// Identifiant du cadre principal (Windows) pour mesurer la RAM de l'onglet.
+    frame_id: Option<u32>,
 }
 
 /// Drapeaux partagés avec les callbacks des WebViews (qui doivent être 'static).
@@ -185,6 +196,9 @@ struct App {
     boot_flags: (bool, bool),
     session_dirty: bool,
     ubo_checked: bool,
+    history: history::History,
+    /// Processus de rendu → cadres principaux (Windows).
+    renderers: Vec<(u32, Vec<u32>)>,
 }
 
 fn main() {
@@ -299,6 +313,8 @@ fn main() {
         boot_flags: (settings_boot.allow_autoplay, settings_boot.hardware_accel),
         session_dirty: false,
         ubo_checked: false,
+        history: history::History::load(),
+        renderers: Vec::new(),
         notice: None,
     };
 
@@ -507,7 +523,7 @@ fn percent_encode(s: &str) -> String {
 }
 
 fn is_shortcut(k: &str) -> bool {
-    matches!(k, "t" | "w" | "l" | "r" | "n" | "T" | "next" | "prev" | "back" | "fwd" | "zin" | "zout" | "z0" | "f11" | "esc")
+    matches!(k, "t" | "w" | "l" | "r" | "n" | "T" | "h" | "next" | "prev" | "back" | "fwd" | "zin" | "zout" | "z0" | "f11" | "esc")
         || (k.len() == 1 && (b'1'..=b'9').contains(&k.as_bytes()[0]))
 }
 
@@ -516,6 +532,7 @@ fn tab_title(url: &str) -> String {
         HOME_URL => "Nouvel onglet".into(),
         SETTINGS_URL => "Paramètres".into(),
         EXT_URL => "Extensions".into(),
+        HISTORY_URL => "Historique".into(),
         _ => url.into(),
     }
 }
@@ -600,9 +617,23 @@ impl App {
         if !self.settings.wallpaper {
             classes.push("nowall");
         }
+        if !self.settings.site_icons {
+            classes.push("noicons");
+        }
+        // JSON inséré dans un <script> : on échappe « < » pour qu'aucun texte ne puisse fermer la balise.
+        let js = |v: serde_json::Value| v.to_string().replace('<', "\\u003c");
+        let top: Vec<_> = self
+            .history
+            .top_sites(8)
+            .into_iter()
+            .map(|(h, url, title, n)| serde_json::json!({"host": h, "url": url, "title": title, "n": n}))
+            .collect();
         HOME_HTML
             .replace("__ACCENT__", &self.settings.accent)
-            .replace("__SEARCH__", &search)
+            .replace("__SEARCH__", &search.replace('<', "\\u003c"))
+            .replace("__TILES__", &js(serde_json::json!(self.settings.home_tiles)))
+            .replace("__TOP__", &js(serde_json::json!(if self.settings.history_enabled { top } else { vec![] })))
+            .replace("__ICONS__", if self.settings.site_icons { "true" } else { "false" })
             .replace("__BODY__", &classes.join(" "))
     }
 
@@ -638,6 +669,7 @@ impl App {
             zoom: self.settings.default_zoom,
             can_back: false,
             can_fwd: false,
+            frame_id: None,
         });
         id
     }
@@ -747,6 +779,17 @@ impl App {
                 let p = p.clone();
                 move |req| {
                     let b = req.body();
+                    if let Some(json) = b.strip_prefix("h:") {
+                        // Raccourcis de la page d'accueil : accepté uniquement depuis la page d'accueil
+                        // (document about:blank chargé par Ferrox), jamais depuis un site.
+                        let uri = req.uri().to_string();
+                        if b.len() <= 16 * 1024 && (uri.starts_with("about:blank") || uri.is_empty()) {
+                            if let Ok(tiles) = serde_json::from_str::<Vec<config::Tile>>(json) {
+                                let _ = p.send_event(UserEvent::HomeTiles(id, tiles));
+                            }
+                        }
+                        return;
+                    }
                     if b.len() > 1024 {
                         return;
                     }
@@ -800,7 +843,15 @@ impl App {
         #[cfg(target_os = "linux")]
         harden_linux(&wv, &self.settings, { let p = p.clone(); move |on| { let _ = p.send_event(UserEvent::Fullscreen(id, on)); } });
         #[cfg(target_os = "windows")]
-        extensions::wv2::on_fullscreen(&wv, { let p = p.clone(); move |on| { let _ = p.send_event(UserEvent::Fullscreen(id, on)); } });
+        {
+            extensions::wv2::on_fullscreen(&wv, { let p = p.clone(); move |on| { let _ = p.send_event(UserEvent::Fullscreen(id, on)); } });
+            extensions::wv2::on_favicon(&wv, { let p = p.clone(); move |u| {
+                if u.starts_with("https://") && u.len() < 1000 && !u.contains(['"', '<', '>', ' ']) {
+                    let _ = p.send_event(UserEvent::Favicon(id, u));
+                }
+            } });
+            self.tabs[idx].frame_id = extensions::wv2::main_frame_id(&wv);
+        }
         if zoom != 100 {
             let _ = wv.zoom(zoom as f64 / 100.0);
         }
@@ -964,9 +1015,32 @@ impl App {
             UserEvent::Title(id, t) => {
                 if let Some(i) = self.idx(id) {
                     if !t.trim().is_empty() {
-                        self.tabs[i].title = t;
+                        self.tabs[i].title = t.clone();
+                    }
+                    // Sites « à page unique » (YouTube…) : l'adresse change sans rechargement.
+                    let cur = self.tabs[i].wv.as_ref().and_then(|w| w.url().ok());
+                    if let Some(cur) = cur.filter(|u| u.starts_with("http")) {
+                        if cur != self.tabs[i].url {
+                            self.tabs[i].url = cur.clone();
+                            self.session_dirty = true;
+                            let nav = self.tabs[i].wv.as_ref().map(|w| (w.can_go_back().unwrap_or(false), w.can_go_forward().unwrap_or(false)));
+                            if let Some((b, f)) = nav {
+                                self.tabs[i].can_back = b;
+                                self.tabs[i].can_fwd = f;
+                            }
+                        }
+                        if !self.tabs[i].private && self.settings.history_enabled {
+                            self.history.visit(&cur, &t);
+                        }
                     }
                     self.push_state();
+                }
+            }
+            UserEvent::Renderers(r) => self.renderers = r,
+            UserEvent::HomeTiles(id, tiles) => {
+                if self.idx(id).is_some_and(|i| self.tabs[i].url == HOME_URL) {
+                    self.settings.home_tiles = config::sanitize_tiles(tiles);
+                    self.settings.save();
                 }
             }
             UserEvent::Load(id, started, url) => {
@@ -986,6 +1060,11 @@ impl App {
                     if let Some(wv) = &t.wv {
                         t.can_back = wv.can_go_back().unwrap_or(false);
                         t.can_fwd = wv.can_go_forward().unwrap_or(false);
+                    }
+                    if !started && !t.private && self.settings.history_enabled && t.url.starts_with("http") {
+                        let (u, title) = (t.url.clone(), t.title.clone());
+                        let title = if title.starts_with("http") { String::new() } else { title };
+                        self.history.visit(&u, &title);
                     }
                     self.push_state();
                 }
@@ -1133,6 +1212,14 @@ impl App {
             "zin" => self.zoom(10),
             "zout" => self.zoom(-10),
             "z0" => self.zoom(0),
+            "h" => {
+                if let Some(t) = self.tabs.iter().find(|t| t.url == HISTORY_URL) {
+                    let id = t.id;
+                    self.switch(id);
+                } else {
+                    self.new_tab(HISTORY_URL.into(), false);
+                }
+            }
             "f11" => {
                 let on = !self.fullscreen;
                 self.set_fullscreen(on);
@@ -1223,6 +1310,16 @@ impl App {
         self.push_state();
     }
 
+    fn ui_eval(&self, js: &str) {
+        let _ = self.ui.evaluate_script(&format!("window.fx && {js}"));
+    }
+
+    fn send_history(&self, q: &str, offset: usize) {
+        let (items, total) = self.history.query(q, offset, 150);
+        let v = serde_json::json!({ "q": q, "offset": offset, "total": total, "items": items, "count": self.history.len() });
+        self.ui_eval(&format!("fx.history({v})"));
+    }
+
     fn save_session(&mut self) {
         let tabs: Vec<&Tab> = self.tabs.iter().filter(|t| !t.private).collect();
         let active = tabs.iter().position(|t| Some(t.id) == self.active).unwrap_or(0);
@@ -1280,9 +1377,32 @@ impl App {
             UiCmd::Zoom { delta } => self.zoom(delta.clamp(-50, 50)),
             UiCmd::ClosePopup => self.close_popup(),
             UiCmd::OpenUrl { url } => {
-                if url.starts_with("https://") {
+                if url.starts_with("https://") || url.starts_with("http://") {
                     self.new_tab(url, false);
                 }
+            }
+            UiCmd::HistoryQuery { q, offset } => self.send_history(&q, offset),
+            UiCmd::HistoryDelete { ids } => {
+                self.history.delete_ids(&ids);
+                self.ui_eval("fx.historyChanged()");
+            }
+            UiCmd::HistoryDeleteHost { host } => {
+                if !host.is_empty() {
+                    self.history.delete_host(&host);
+                }
+                self.ui_eval("fx.historyChanged()");
+            }
+            UiCmd::HistoryClear { range } => {
+                let secs = match range.as_str() {
+                    "hour" => 3600,
+                    "day" => 86_400,
+                    "week" => 7 * 86_400,
+                    "month" => 28 * 86_400,
+                    "all" => 0,
+                    _ => return,
+                };
+                self.history.delete_since(secs);
+                self.ui_eval("fx.historyChanged()");
             }
             UiCmd::Restart => {
                 self.settings.save();
@@ -1359,6 +1479,7 @@ impl App {
                 let url = match name.as_str() {
                     "settings" => SETTINGS_URL,
                     "extensions" => EXT_URL,
+                    "history" => HISTORY_URL,
                     _ => return,
                 };
                 if let Some(t) = self.tabs.iter().find(|t| t.url == url) {
@@ -1490,15 +1611,42 @@ impl App {
             self.save_session();
         }
         self.usage = self.monitor.sample();
+        #[cfg(target_os = "windows")]
+        {
+            let p = self.proxy.clone();
+            extensions::wv2::renderer_frames(&self.ui, move |r| {
+                let _ = p.send_event(UserEvent::Renderers(r));
+            });
+        }
         self.enforce_limits();
         self.push_state();
     }
 
     fn push_state(&self) {
+        // RAM par onglet : processus de rendu qui affiche son cadre principal
+        // (si plusieurs onglets partagent un processus, sa mémoire est répartie).
+        let pid_of = |t: &Tab| -> Option<u32> {
+            let f = t.frame_id?;
+            self.renderers.iter().find(|(_, frames)| frames.contains(&f)).map(|(pid, _)| *pid)
+        };
+        let mut shares: std::collections::HashMap<u32, usize> = Default::default();
+        for t in self.tabs.iter().filter(|t| t.wv.is_some()) {
+            if let Some(pid) = pid_of(t) {
+                *shares.entry(pid).or_default() += 1;
+            }
+        }
         let tabs: Vec<_> = self
             .tabs
             .iter()
             .map(|t| {
+                let (mem, shared) = match pid_of(t).filter(|_| t.wv.is_some()) {
+                    Some(pid) => {
+                        let n = shares.get(&pid).copied().unwrap_or(1).max(1);
+                        let bytes = self.usage.per_pid.get(&pid).map(|m| m.0).unwrap_or(0);
+                        (Some(bytes / n as u64 / (1024 * 1024)), n > 1)
+                    }
+                    None => (None, false),
+                };
                 serde_json::json!({
                     "id": t.id,
                     "title": t.title,
@@ -1513,6 +1661,8 @@ impl App {
                     "zoom": t.zoom,
                     "can_back": t.can_back,
                     "can_fwd": t.can_fwd,
+                    "mem": mem,
+                    "shared": shared,
                 })
             })
             .collect();
@@ -1520,7 +1670,13 @@ impl App {
             "tabs": tabs,
             "panel": self.panel,
             "settings": self.settings,
-            "usage": {"ram": self.usage.ram_mb, "cpu": self.usage.cpu_pct, "procs": self.usage.procs},
+            "usage": {
+                "ram": self.usage.ram_mb, "cpu": self.usage.cpu_pct, "procs": self.usage.procs,
+                "sys_total": self.usage.sys_total_mb, "sys_used": self.usage.sys_used_mb,
+                "cats": self.usage.categories,
+                "per_tab": cfg!(target_os = "windows"),
+            },
+            "history_count": self.history.len(),
             "blocked_total": self.blocked_total,
             "blocklist": self.shared.blocker.len(),
             "notice": self.notice,
@@ -1598,7 +1754,7 @@ const PRIVACY_SCRIPT: &str = r#"(() => {
       if (k === 'tab') c = e.shiftKey ? 'prev' : 'next';
       else if (e.shiftKey && k === 't') c = 'T';
       else if (e.shiftKey && k === 'n') c = 'n';
-      else if (!e.shiftKey && ['t', 'w', 'l', 'r'].includes(k)) c = k;
+      else if (!e.shiftKey && ['t', 'w', 'l', 'r', 'h'].includes(k)) c = k;
       else if (!e.shiftKey && /^[1-9]$/.test(k)) c = k;
       else if (k === '+' || k === '=') c = 'zin';
       else if (k === '-') c = 'zout';
