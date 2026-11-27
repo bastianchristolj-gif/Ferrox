@@ -141,7 +141,7 @@ body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !im
     if (!ICONS || !host) return avatar(host);
     const img = el('img'); img.alt = ''; img.referrerPolicy = 'no-referrer';
     img.onerror = () => img.replaceWith(avatar(host));
-    img.src = 'https://icons.duckduckgo.com/ip3/' + host + '.ico';
+    try { img.src = new URL(url).origin.replace(/^http:/, 'https:') + '/favicon.ico'; } catch (_) { return avatar(host); }
     return img;
   }
 
@@ -166,7 +166,8 @@ body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !im
   });
 
   // ---- Raccourcis
-  const save = () => { try { window.ipc && window.ipc.postMessage('h:' + JSON.stringify(tiles)); } catch (_) {} };
+  // Ferrox écoute cet événement uniquement sur sa propre page d'accueil.
+  const save = () => { document.dispatchEvent(new CustomEvent('fx-tiles', { detail: JSON.stringify(tiles) })); };
   let dragFrom = -1;
   function render() {
     const box = $('tiles'); box.replaceChildren();

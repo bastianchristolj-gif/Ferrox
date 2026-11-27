@@ -84,6 +84,7 @@ enum UserEvent {
     ExtList(Vec<(String, String, bool)>),
     ExtChanged(Option<String>, bool),
     Favicon(u64, String),
+    NetBlocked(u64),
     Renderers(Vec<(u32, Vec<u32>)>),
     HomeTiles(u64, Vec<config::Tile>),
     Fullscreen(u64, bool),
@@ -152,6 +153,8 @@ struct Tab {
     frame_id: Option<u32>,
     /// Onglet suspendu par le moteur (Windows).
     suspended: bool,
+    /// Requêtes bloquées au niveau réseau sur la page actuelle (Windows).
+    blocked_net: u32,
 }
 
 /// Drapeaux partagés avec les callbacks des WebViews (qui doivent être 'static).
@@ -188,6 +191,11 @@ struct App {
     ext_status: Option<(bool, String)>,
     /// Rayon des coins arrondis par Windows 11 (0 ailleurs).
     corner_radius: u32,
+    /// Clé secrète du canal interface → Ferrox.
+    ui_token: String,
+    /// Domaines bloqués au niveau réseau (Windows).
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    net_domains: Vec<String>,
     /// Onglets fermés récemment (Ctrl+Maj+T).
     closed: Vec<String>,
     /// Plein écran (vidéo ou F11) : le contenu occupe toute la fenêtre.
@@ -251,8 +259,12 @@ fn main() {
     // Un seul contexte (et donc un seul processus réseau) pour l'interface et les onglets.
     let mut ctx = WebContext::new(Some(config::data_dir()));
 
+    // Clé de l'interface : remise au script de l'interface après son chargement ; toute
+    // commande sans elle est ignorée (aucun autre script ne peut piloter Ferrox).
+    let ui_token = secret();
     let ui = {
         let p = proxy.clone();
+        let tok = format!("{ui_token}|");
         let builder = WebViewBuilder::new_with_web_context(&mut ctx)
             .with_html(UI_HTML)
             .with_bounds(full_rect(&window))
@@ -260,8 +272,18 @@ fn main() {
             .with_devtools(cfg!(debug_assertions))
             .with_hotkeys_zoom(false)
             .with_ipc_handler(move |req| {
+                // Uniquement depuis la page de l'interface (document about:blank de Ferrox).
+                if !req.uri().to_string().starts_with("about:blank") {
+                    return;
+                }
                 let body = req.into_body();
-                if body.len() <= 64 * 1024 {
+                if body.len() > 64 * 1024 {
+                    return;
+                }
+                if let Some(cmd) = body.strip_prefix(tok.as_str()) {
+                    let _ = p.send_event(UserEvent::Ui(cmd.to_string()));
+                } else if body == r#"{"cmd":"ready"}"# {
+                    // seul message accepté sans clé : il déclenche la remise de la clé
                     let _ = p.send_event(UserEvent::Ui(body));
                 }
             })
@@ -293,6 +315,7 @@ fn main() {
         download_dir: Arc::new(std::sync::Mutex::new(download_dir_of(&settings))),
     };
 
+    let net_domains = shared.blocker.domains();
     let mut app = App {
         window,
         #[cfg(target_os = "linux")]
@@ -312,6 +335,8 @@ fn main() {
         exts: Vec::new(),
         ext_status: None,
         corner_radius: 0,
+        ui_token,
+        net_domains,
         closed: Vec::new(),
         fullscreen: false,
         popup: None,
@@ -549,6 +574,48 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
+/// 128 bits aléatoires (graine aléatoire du système via `RandomState`), en hexadécimal.
+fn secret() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    use std::sync::atomic::AtomicU64;
+    static N: AtomicU64 = AtomicU64::new(0);
+    let mut out = String::new();
+    for _ in 0..2 {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(N.fetch_add(1, Ordering::Relaxed));
+        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+        out.push_str(&format!("{:016x}", h.finish()));
+    }
+    out
+}
+
+/// Script injecté au début de chaque document d'un onglet.
+/// Il capture la fonction native d'envoi AVANT que le site ne s'exécute : le site ne peut
+/// ni l'intercepter ni connaître la clé, donc ne peut pas se faire passer pour Ferrox.
+fn content_init(token: &str, blocker: Option<&str>, dnt: bool) -> String {
+    format!(
+        r#"(() => {{
+  'use strict';
+  const __T = '{token}';
+  const __apply = Reflect.apply;
+  const __post = (() => {{
+    try {{
+      const w = window.chrome && window.chrome.webview;
+      if (w && w.postMessage) {{ const f = w.postMessage; return (m) => __apply(f, w, [m]); }}
+      const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc;
+      if (h && h.postMessage) {{ const f = h.postMessage; return (m) => __apply(f, h, [m]); }}
+    }} catch (_) {{}}
+    return null;
+  }})();
+  const __fxSend = (m) => {{ try {{ if (__post) __post(__T + '|' + m); }} catch (_) {{}} }};
+  {blocker}
+  {privacy}
+}})();"#,
+        blocker = blocker.unwrap_or(""),
+        privacy = PRIVACY_SCRIPT.replace("__DNT__", if dnt { "true" } else { "false" }),
+    )
+}
+
 fn is_shortcut(k: &str) -> bool {
     matches!(k, "t" | "w" | "l" | "r" | "n" | "T" | "h" | "next" | "prev" | "back" | "fwd" | "zin" | "zout" | "z0" | "f11" | "esc")
         || (k.len() == 1 && (b'1'..=b'9').contains(&k.as_bytes()[0]))
@@ -698,6 +765,7 @@ impl App {
             can_fwd: false,
             frame_id: None,
             suspended: false,
+            blocked_net: 0,
         });
         id
     }
@@ -724,10 +792,14 @@ impl App {
             WebViewBuilder::new_with_web_context(&mut self.ctx)
         };
 
-        if adblock {
-            builder = builder.with_initialization_script(sh.script.as_str());
-        }
-        builder = builder.with_initialization_script(PRIVACY_SCRIPT.replace("__DNT__", if self.settings.send_dnt { "true" } else { "false" }));
+        // Canal privé page → Ferrox : clé secrète propre à l'onglet, gardée dans une
+        // fermeture JavaScript que les scripts du site ne peuvent pas lire.
+        let token = secret();
+        builder = builder.with_initialization_script(content_init(
+            &token,
+            adblock.then(|| sh.script.as_str()),
+            self.settings.send_dnt,
+        ));
 
         let nav = {
             let (sh, p) = (sh.clone(), p.clone());
@@ -806,7 +878,8 @@ impl App {
             .with_ipc_handler({
                 let p = p.clone();
                 move |req| {
-                    let b = req.body();
+                    // Message sans la clé de l'onglet → ignoré (forgé par un site).
+                    let Some(b) = req.body().strip_prefix(token.as_str()).and_then(|r| r.strip_prefix('|')) else { return };
                     if let Some(json) = b.strip_prefix("h:") {
                         // Raccourcis de la page d'accueil : accepté uniquement depuis la page d'accueil
                         // (document about:blank chargé par Ferrox), jamais depuis un site.
@@ -879,6 +952,12 @@ impl App {
                 }
             } });
             self.tabs[idx].frame_id = extensions::wv2::main_frame_id(&wv);
+            if adblock {
+                let p = p.clone();
+                extensions::wv2::network_block(&wv, &self.net_domains, move || {
+                    let _ = p.send_event(UserEvent::NetBlocked(id));
+                });
+            }
         }
         if zoom != 100 {
             let _ = wv.zoom(zoom as f64 / 100.0);
@@ -1082,6 +1161,7 @@ impl App {
                     t.loading = started;
                     if started {
                         t.blocked = 0;
+                        t.blocked_net = 0;
                         if blocker::host_of(&url) != blocker::host_of(&t.url) {
                             t.favicon = None;
                         }
@@ -1209,6 +1289,13 @@ impl App {
                 }
             }
             UserEvent::ClosePopup => self.close_popup(),
+            UserEvent::NetBlocked(id) => {
+                self.blocked_total += 1;
+                if let Some(i) = self.idx(id) {
+                    self.tabs[i].blocked_net += 1;
+                    self.push_state();
+                }
+            }
         }
     }
 
@@ -1398,6 +1485,8 @@ impl App {
     fn on_ui(&mut self, cmd: UiCmd) {
         match cmd {
             UiCmd::Ready => {
+                // (re)donne la clé à l'interface ; elle ne l'accepte qu'une fois
+                let _ = self.ui.evaluate_script(&format!("window.fx && fx.setToken('{}')", self.ui_token));
                 self.last_state.borrow_mut().clear();
                 self.push_state();
                 self.ext_refresh();
@@ -1728,7 +1817,7 @@ impl App {
                     "loading": t.loading,
                     "sleeping": t.wv.is_none() && internal_page(&t.url).is_none(),
                     "private": t.private,
-                    "blocked": t.blocked,
+                    "blocked": t.blocked + t.blocked_net,
                     "favicon": t.favicon,
                     "zoom": t.zoom,
                     "can_back": t.can_back,
@@ -1829,8 +1918,9 @@ const PRIVACY_SCRIPT: &str = r#"(() => {
     try { Object.defineProperty(Navigator.prototype, 'doNotTrack', { get: () => '1', configurable: true }); } catch (_) {}
   }
   if (window.top !== window) return;
-  const send = (m) => { try { window.ipc && window.ipc.postMessage(m); } catch (_) {} };
+  const send = __fxSend;
   addEventListener('keydown', (e) => {
+    if (!e.isTrusted) return; // ignore les faux événements créés par la page
     const k = e.key.toLowerCase();
     let c = null;
     if (e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -1849,7 +1939,13 @@ const PRIVACY_SCRIPT: &str = r#"(() => {
     else if (k === 'escape' && !document.fullscreenElement) { send('k:esc'); return; }
     if (c) { e.preventDefault(); e.stopPropagation(); send('k:' + c); }
   }, true);
-  addEventListener('mousedown', () => send('x'), true);
+  addEventListener('mousedown', (e) => { if (e.isTrusted) send('x'); }, true);
+  // Raccourcis de la page d'accueil (document about:blank de Ferrox uniquement).
+  if (location.href === 'about:blank') {
+    document.addEventListener('fx-tiles', (e) => {
+      if (typeof e.detail === 'string' && e.detail.length < 16000) send('h:' + e.detail);
+    });
+  }
   const icon = () => {
     const l = document.querySelector('link[rel~="icon"][href], link[rel="shortcut icon"][href], link[rel="apple-touch-icon"][href]');
     let u = l ? l.href : (location.protocol === 'https:' ? location.origin + '/favicon.ico' : '');

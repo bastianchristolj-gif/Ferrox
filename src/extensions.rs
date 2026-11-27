@@ -312,6 +312,35 @@ pub mod wv2 {
         }
     }
 
+    /// Blocage au niveau réseau : le moteur annule les requêtes vers les domaines bloqués
+    /// avant qu'elles ne partent (scripts, images, iframes, requêtes XHR, balises…).
+    /// Un filtre est posé par domaine : seules ces requêtes passent par Ferrox.
+    pub fn network_block(wv: &wry::WebView, domains: &[String], on_block: impl Fn() + 'static) {
+        let w = wv.webview();
+        let env = wv.environment();
+        unsafe {
+            for d in domains.iter().take(1500) {
+                for pat in [format!("*://{d}/*"), format!("*://*.{d}/*")] {
+                    let _ = w.AddWebResourceRequestedFilter(&HSTRING::from(pat), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+                }
+            }
+        }
+        let handler = webview2_com::WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            unsafe {
+                if let Ok(resp) = env.CreateWebResourceResponse(None::<&windows::Win32::System::Com::IStream>, 403, &HSTRING::from("Blocked by Ferrox"), &HSTRING::new()) {
+                    let _ = args.SetResponse(&resp);
+                    on_block();
+                }
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        unsafe {
+            let _ = w.add_WebResourceRequested(&handler, &mut token);
+        }
+    }
+
     /// Onglet visible → mémoire normale ; caché → le moteur libère ses caches.
     pub fn set_background(wv: &wry::WebView, hidden: bool) {
         let _ = wv.set_memory_usage_level(if hidden { wry::MemoryUsageLevel::Low } else { wry::MemoryUsageLevel::Normal });

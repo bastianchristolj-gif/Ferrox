@@ -534,7 +534,21 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
 'use strict';
 (() => {
   const $ = (s) => document.querySelector(s);
-  const send = (o) => window.ipc.postMessage(JSON.stringify(o));
+  // Canal privé vers Ferrox : fonction native capturée au chargement + clé remise par Ferrox.
+  const __apply = Reflect.apply, __stringify = JSON.stringify;
+  const __post = (() => {
+    const w = window.chrome && window.chrome.webview;
+    if (w && w.postMessage) { const f = w.postMessage; return (m) => __apply(f, w, [m]); }
+    const hh = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc;
+    if (hh && hh.postMessage) { const f = hh.postMessage; return (m) => __apply(f, hh, [m]); }
+    return () => {};
+  })();
+  let TOKEN = null;
+  const send = (o) => {
+    const s = __stringify(o);
+    if (TOKEN) __post(TOKEN + '|' + s);
+    else if (o.cmd === 'ready') __post(s);
+  };
   const h = (tag, props = {}, ...kids) => {
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(props)) {
@@ -807,12 +821,14 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
   /** Icône d'un site : celle fournie par la page, sinon service d'icônes de DuckDuckGo, sinon une lettre. */
   function siteIcon(url, given) {
     const host = hostOf(url);
-    const src = given || (S.settings.site_icons && host && /^https?:/.test(url) ? `https://icons.duckduckgo.com/ip3/${host}.ico` : '');
+    // Icône demandée au site lui-même (aucun service tiers ne voit les sites visités).
+    const origin = (() => { try { const x = new URL(url); return x.protocol === 'https:' ? x.origin : ''; } catch (_) { return ''; } })();
+    const src = given || (S.settings.site_icons && origin ? origin + '/favicon.ico' : '');
     if (!src) return avatar(host);
     const img = h('img', { alt: '', referrerpolicy: 'no-referrer', loading: 'lazy' });
     img.addEventListener('error', () => {
       // l'icône de la page a échoué → on tente DuckDuckGo, puis la lettre
-      if (given && S.settings.site_icons && host && !img.dataset.f) { img.dataset.f = '1'; img.src = `https://icons.duckduckgo.com/ip3/${host}.ico`; }
+      if (given && S.settings.site_icons && origin && !img.dataset.f) { img.dataset.f = '1'; img.src = origin + '/favicon.ico'; }
       else img.replaceWith(avatar(host));
     });
     img.src = src;
@@ -1196,7 +1212,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Mode HTTPS uniquement', 'Bloque les connexions non chiffrées (vous pouvez autoriser un site).', tgl('https_only'), 'http'),
         row('Bloquer caméra, micro et position', 'Refuse automatiquement ces permissions aux sites.', tgl('block_permissions'), 'permissions'),
         row('Anti-empreinte strict', 'Désactive WebGL et WebAudio (certains jeux web peuvent ne plus marcher).', tgl('anti_fingerprint'), 'fingerprint'),
-        row('Icônes des sites via DuckDuckGo', 'Quand un site ne fournit pas d\'icône, Ferrox la demande au service d\'icônes de DuckDuckGo (le nom du site lui est envoyé).', tgl('site_icons'), 'favicon icones'),
+        row('Afficher les icônes des sites', 'Chargées directement depuis chaque site (aucun service tiers). Désactivé : une lettre de couleur les remplace.', tgl('site_icons'), 'favicon icones'),
         row('Envoyer « Ne pas me pister »', 'Signaux Do-Not-Track et Global Privacy Control envoyés aux sites.', tgl('send_dnt'), 'dnt gpc'),
         row('Effacer les données à la fermeture', 'Cookies, cache et stockage supprimés quand vous quittez Ferrox.', tgl('clear_on_exit'), 'cookies quitter'),
         row('Effacer les données de navigation', 'Cookies, cache et stockage de tous les sites.', h('button', { class: 'btn2 danger', onclick: () => send({ cmd: 'clear_data' }) }, 'Effacer'), 'cookies cache'))),
@@ -1368,6 +1384,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
       renderTabs(); renderBar(); renderPanel(); renderPage();
     },
     focusUrl() { const u = $('#url'); u.focus(); u.select(); },
+    setToken(t) { if (TOKEN === null && typeof t === 'string') TOKEN = t; },
     history(d) {
       if (d.q !== H.q) return; // réponse à une ancienne recherche
       H.items = d.offset ? H.items.concat(d.items) : d.items;

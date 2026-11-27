@@ -66,6 +66,14 @@ impl Blocker {
         Self { domains }
     }
 
+    /// Domaines bloqués (pour les filtres réseau du moteur).
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn domains(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.domains.iter().cloned().collect();
+        v.sort();
+        v
+    }
+
     pub fn len(&self) -> usize {
         self.domains.len()
     }
@@ -126,7 +134,7 @@ const CONTENT_SCRIPT: &str = r#"(() => {
   const report = () => {
     if (timer) return;
     timer = setTimeout(() => { timer = 0;
-      try { if (window.top === window && window.ipc) window.ipc.postMessage('b:' + Math.min(blocked, 100000)); } catch (_) {}
+      if (window.top === window) __fxSend('b:' + Math.min(blocked, 100000));
     }, 400);
   };
   const isBad = (u) => {

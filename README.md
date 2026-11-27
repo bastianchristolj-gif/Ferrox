@@ -101,9 +101,22 @@ cargo build --release
 - Liste de blocage personnalisée : `blocklist.txt` dans le même dossier. Un domaine par ligne, le format « hosts » est accepté. Vous pouvez par exemple y coller la liste [StevenBlack/hosts](https://github.com/StevenBlack/hosts).
 - Profil (cookies, cache) : `%LOCALAPPDATA%\ferrox\profile` sous Windows, `~/.local/share/ferrox/profile` sous Linux
 
+## Sécurité
+
+- **Moteur** : Microsoft Edge WebView2 (Chromium), mis à jour automatiquement par Microsoft. Chaque site tourne dans un processus isolé, dans un bac à sable. SmartScreen anti-phishing est actif.
+- **Canal privé page → Ferrox** : chaque onglet reçoit une clé secrète de 128 bits. Elle est stockée dans une fermeture JavaScript injectée avant les scripts du site, avec la fonction d'envoi native capturée au chargement. Un site ne peut donc ni lire la clé, ni intercepter l'envoi, ni se faire passer pour Ferrox. Les faux événements clavier (`isTrusted = false`) sont ignorés.
+- **Interface** : elle a sa propre clé, remise après son chargement. Ses commandes ne sont acceptées que depuis sa page `about:blank`.
+- **Page d'accueil** : ses raccourcis ne sont modifiables que depuis la page d'accueil de Ferrox elle-même.
+- **Blocage réseau (Windows)** : le moteur annule les requêtes vers les domaines bloqués avant qu'elles ne partent. S'y ajoutent le blocage JavaScript et uBlock Origin Lite.
+- **Navigation** : `file://` et `javascript:` sont refusés, le mode HTTPS uniquement est actif, et caméra, micro et position sont refusés par défaut.
+- **Extensions** : seulement depuis le Chrome Web Store, avec vérification de la signature et extraction protégée contre les chemins piégés.
+- **Aucun service tiers** : les icônes des sites sont chargées depuis les sites eux-mêmes.
+- **Intégrité** : `SHA256SUMS.txt` accompagne chaque version. Pour vérifier un fichier : `certutil -hashfile Ferrox-Setup.exe SHA256`.
+
 ## Limites connues (v0.1)
 
-- Le bloqueur agit au niveau des navigations et du JavaScript de la page. Il n'intercepte pas encore les requêtes au niveau réseau : une ressource déclarée en dur dans le HTML peut partir avant d'être retirée.
+- Linux : le bloqueur agit au niveau des navigations et du JavaScript (le blocage réseau est réservé à Windows).
+- Les fichiers ne sont pas signés numériquement (certificat payant) : Windows affiche un avertissement au premier lancement.
 - Le mode HTTPS uniquement **bloque** les liens `http://` et propose « Autoriser ce site ». Il ne réessaie pas automatiquement en HTTPS.
 - Pas encore de favoris, d'historique ni de restauration de session.
 - Extensions : Windows uniquement. Le bouton d'action d'une extension s'ouvre dans un onglet, pas dans une bulle.

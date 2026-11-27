@@ -54,7 +54,7 @@ pub struct Settings {
     pub show_ram: bool,
     /// Raccourcis de la page Nouvel onglet.
     pub home_tiles: Vec<Tile>,
-    /// Icônes des sites via le service de DuckDuckGo quand le site n'en fournit pas.
+    /// Affiche les icônes des sites (chargées depuis les sites eux-mêmes).
     pub site_icons: bool,
     /// Enregistre l'historique de navigation.
     pub history_enabled: bool,
