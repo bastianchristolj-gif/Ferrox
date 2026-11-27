@@ -33,8 +33,10 @@ use wry::{
     dpi::{LogicalPosition, LogicalSize as WLogicalSize},
 };
 
-const TOP_H: u32 = 84;
-const SIDE_W: u32 = 56;
+/// Hauteur barre d'onglets (36) + barre de navigation (38).
+const TOP_H: u32 = 74;
+/// Cadre autour du contenu (liseré d'accent + zone de redimensionnement).
+const BORDER: u32 = 3;
 const PANEL_W: u32 = 320;
 const TICK: Duration = Duration::from_secs(2);
 
@@ -77,6 +79,11 @@ enum UiCmd {
     Settings { settings: Settings },
     AllowHttp { url: String },
     ClearData,
+    Drag,
+    Minimize,
+    Maximize,
+    Quit,
+    Resize { dir: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +145,7 @@ fn main() {
 
     let window = WindowBuilder::new()
         .with_title("Ferrox")
+        .with_decorations(false) // barre de titre intégrée aux onglets
         .with_inner_size(LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(LogicalSize::new(640.0, 400.0))
         .build(&event_loop)
@@ -287,10 +295,15 @@ impl App {
     // ------------------------------------------------------------------ layout
     fn content_rect(&self) -> Rect {
         let (w, h) = logical_size(&self.window);
-        let x = SIDE_W + if self.panel.is_some() { PANEL_W } else { 0 };
+        let b = if self.window.is_maximized() { 0 } else { BORDER };
+        let panel = if self.panel.is_some() { PANEL_W } else { 0 };
         Rect {
-            position: LogicalPosition::new(x, TOP_H).into(),
-            size: WLogicalSize::new(w.saturating_sub(x).max(1), h.saturating_sub(TOP_H).max(1)).into(),
+            position: LogicalPosition::new(b, TOP_H).into(),
+            size: WLogicalSize::new(
+                w.saturating_sub(2 * b + panel).max(1),
+                h.saturating_sub(TOP_H + b).max(1),
+            )
+            .into(),
         }
     }
 
@@ -777,6 +790,28 @@ impl App {
                     }
                 }
             }
+            UiCmd::Drag => {
+                let _ = self.window.drag_window();
+            }
+            UiCmd::Minimize => self.window.set_minimized(true),
+            UiCmd::Maximize => {
+                self.window.set_maximized(!self.window.is_maximized());
+                self.layout();
+                self.push_state();
+            }
+            UiCmd::Quit => {
+                self.settings.save();
+                std::process::exit(0);
+            }
+            UiCmd::Resize { dir } => {
+                use tao::window::ResizeDirection as D;
+                let d = match dir.as_str() {
+                    "n" => D::North, "s" => D::South, "e" => D::East, "w" => D::West,
+                    "ne" => D::NorthEast, "nw" => D::NorthWest, "se" => D::SouthEast, "sw" => D::SouthWest,
+                    _ => return,
+                };
+                let _ = self.window.drag_resize_window(d);
+            }
             UiCmd::ClearData => {
                 for t in &self.tabs {
                     if let Some(wv) = &t.wv {
@@ -821,7 +856,8 @@ impl App {
             "blocked_total": self.blocked_total,
             "blocklist": self.shared.blocker.len(),
             "notice": self.notice,
-            "layout": {"top": TOP_H, "side": SIDE_W, "panel": PANEL_W},
+            "layout": {"top": TOP_H, "border": if self.window.is_maximized() { 0 } else { BORDER }, "panel": PANEL_W},
+            "maximized": self.window.is_maximized(),
         });
         // serde_json produit un littéral JS sûr : aucune injection possible.
         let _ = self.ui.evaluate_script(&format!("window.fx && fx.render({state})"));
