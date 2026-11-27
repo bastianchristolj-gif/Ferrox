@@ -116,7 +116,7 @@ pub fn parse_crx3<'a>(data: &'a [u8], expected_id: &str) -> Result<(&'a [u8], Op
 
 // -------------------------------------------------------- Téléchargement
 
-fn http_agent() -> ureq::Agent {
+pub(crate) fn http_agent() -> ureq::Agent {
     use ureq::tls::{RootCerts, TlsConfig};
     ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(90)))

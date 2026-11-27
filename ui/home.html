@@ -130,6 +130,7 @@ body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !im
   let tiles = __TILES__;
   const TOP = __TOP__;
   const ICONS = __ICONS__;
+  const MAP = __ICONMAP__; // hôte → vraie icône (trouvée par Ferrox dans la page du site)
   const DEFAULT = [["YouTube","https://www.youtube.com"],["Twitch","https://www.twitch.tv"],["Steam","https://store.steampowered.com"],["Reddit","https://www.reddit.com"],["Discord","https://discord.com/app"],["Epic Games","https://store.epicgames.com"],["Wikipédia","https://fr.wikipedia.org"],["GitHub","https://github.com"]].map(([name, url]) => ({ name, url }));
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -139,8 +140,10 @@ body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !im
   function siteIcon(url) {
     const host = hostOf(url);
     if (!ICONS || !host) return avatar(host);
+    if (MAP[host]) { const im = el('img'); im.alt = ''; im.dataset.host = host; im.src = MAP[host]; return im; }
     const img = el('img'); img.alt = ''; img.referrerPolicy = 'no-referrer';
-    img.onerror = () => img.replaceWith(avatar(host));
+    img.dataset.host = host;
+    img.onerror = () => { const a = avatar(host); a.dataset.host = host; img.replaceWith(a); };
     try { img.src = new URL(url).origin.replace(/^http:/, 'https:') + '/favicon.ico'; } catch (_) { return avatar(host); }
     return img;
   }
@@ -222,6 +225,15 @@ body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !im
       $('top').append(a);
     }
   } else $('topsec').style.display = 'none';
+  // Ferrox envoie les icônes dès qu'il les a trouvées (sans recharger la page).
+  window.fxIcon = (host, data) => {
+    if (typeof host !== 'string' || typeof data !== 'string' || !data.startsWith('data:image/')) return;
+    MAP[host] = data;
+    document.querySelectorAll('[data-host]').forEach((n) => {
+      if (n.dataset.host !== host) return;
+      const im = el('img'); im.alt = ''; im.dataset.host = host; im.src = data; n.replaceWith(im);
+    });
+  };
   render();
 })();
 </script>

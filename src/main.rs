@@ -15,6 +15,7 @@ mod blocker;
 mod config;
 mod extensions;
 mod history;
+mod icons;
 mod monitor;
 
 use blocker::Blocker;
@@ -85,6 +86,7 @@ enum UserEvent {
     ExtChanged(Option<String>, bool),
     Favicon(u64, String),
     NetBlocked(u64),
+    Icon(String, Option<String>),
     Renderers(Vec<(u32, Vec<u32>)>),
     HomeTiles(u64, Vec<config::Tile>),
     Fullscreen(u64, bool),
@@ -193,6 +195,9 @@ struct App {
     corner_radius: u32,
     /// Clé secrète du canal interface → Ferrox.
     ui_token: String,
+    /// Vraies icônes des sites (hôte → data URL), pour l'accueil et l'interface.
+    icon_map: std::collections::HashMap<String, String>,
+    icons_pending: std::collections::HashSet<String>,
     /// Domaines bloqués au niveau réseau (Windows).
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     net_domains: Vec<String>,
@@ -337,6 +342,8 @@ fn main() {
         corner_radius: 0,
         ui_token,
         net_domains,
+        icon_map: Default::default(),
+        icons_pending: Default::default(),
         closed: Vec::new(),
         fullscreen: false,
         popup: None,
@@ -367,6 +374,7 @@ fn main() {
     #[cfg(target_os = "windows")]
     extensions::wv2::set_autofill(&app.ui, app.settings.autofill, app.settings.save_passwords);
 
+    app.refresh_icons();
     let start = std::env::args().nth(1).map(|a| app.resolve_input(&a));
     let session = config::Session::load();
     if let Some(url) = start {
@@ -522,31 +530,10 @@ fn download_dir_of(s: &Settings) -> Option<std::path::PathBuf> {
 const WEBVIEW2_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeShoppingAssistant,\
 AutofillServerCommunication,msEdgeCollections --no-pings --disable-domain-reliability";
 
-/// Icône de fenêtre (hexagone d'accent) générée en mémoire : aucun fichier à charger.
+/// Icône de fenêtre : le renard Ferrox (64×64 RGBA, généré depuis assets/logo/fox.svg).
 fn app_icon() -> Option<tao::window::Icon> {
-    const N: u32 = 64;
-    let mut rgba = Vec::with_capacity((N * N * 4) as usize);
-    let c = N as f32 / 2.0;
-    for y in 0..N {
-        for x in 0..N {
-            let (dx, dy) = ((x as f32 + 0.5 - c).abs(), (y as f32 + 0.5 - c).abs());
-            let r = c - 2.0;
-            // hexagone "pointe en haut"
-            let inside = dx <= r * 0.866 && dy <= r - dx * 0.577;
-            let edge = inside && !(dx <= r * 0.866 - 5.0 && dy <= r - 5.0 - dx * 0.577);
-            // lettre F
-            let (fx, fy) = (x as i32 - 24, y as i32 - 18);
-            let letter = (0..6).contains(&fx) && (0..28).contains(&fy)
-                || (0..20).contains(&fx) && (0..6).contains(&fy)
-                || (0..15).contains(&fx) && (11..16).contains(&fy);
-            let px = if letter && inside { [255, 255, 255, 255] }
-                else if edge { [250, 30, 78, 255] }
-                else if inside { [26, 10, 16, 255] }
-                else { [0, 0, 0, 0] };
-            rgba.extend_from_slice(&px);
-        }
-    }
-    tao::window::Icon::from_rgba(rgba, N, N).ok()
+    const RGBA: &[u8] = include_bytes!("../assets/logo/icon64.rgba");
+    tao::window::Icon::from_rgba(RGBA.to_vec(), 64, 64).ok()
 }
 
 fn logical_size(window: &Window) -> (u32, u32) {
@@ -728,6 +715,7 @@ impl App {
             .replace("__TILES__", &js(serde_json::json!(self.settings.home_tiles)))
             .replace("__TOP__", &js(serde_json::json!(if self.settings.history_enabled { top } else { vec![] })))
             .replace("__ICONS__", if self.settings.site_icons { "true" } else { "false" })
+            .replace("__ICONMAP__", &js(serde_json::json!(if self.settings.site_icons { self.icon_map.clone() } else { Default::default() })))
             .replace("__BODY__", &classes.join(" "))
     }
 
@@ -1153,6 +1141,23 @@ impl App {
                 if self.idx(id).is_some_and(|i| self.tabs[i].url == HOME_URL) {
                     self.settings.home_tiles = config::sanitize_tiles(tiles);
                     self.settings.save();
+                    self.refresh_icons();
+                }
+            }
+            UserEvent::Icon(host, data) => {
+                self.icons_pending.remove(&host);
+                if let Some(d) = data {
+                    icons::store(&host, &d);
+                    let js = |v: &str| serde_json::to_string(v).unwrap_or_default();
+                    let call = format!("window.fxIcon && fxIcon({}, {})", js(&host), js(&d));
+                    // pages d'accueil ouvertes + interface
+                    for t in self.tabs.iter().filter(|t| t.url == HOME_URL) {
+                        if let Some(wv) = &t.wv {
+                            let _ = wv.evaluate_script(&call);
+                        }
+                    }
+                    self.icon_map.insert(host, d);
+                    self.send_icons();
                 }
             }
             UserEvent::Load(id, started, url) => {
@@ -1489,6 +1494,7 @@ impl App {
                 let _ = self.ui.evaluate_script(&format!("window.fx && fx.setToken('{}')", self.ui_token));
                 self.last_state.borrow_mut().clear();
                 self.push_state();
+                self.send_icons();
                 self.ext_refresh();
             }
             UiCmd::Navigate { input } => {
@@ -1681,6 +1687,48 @@ impl App {
     fn ext_set_status(&mut self, busy: bool, msg: String) {
         self.ext_status = Some((busy, msg));
         self.push_state();
+    }
+
+    /// Charge depuis le cache (ou télécharge en arrière-plan) les icônes des raccourcis
+    /// et des sites les plus visités.
+    fn refresh_icons(&mut self) {
+        if !self.settings.site_icons {
+            return;
+        }
+        let mut urls: Vec<String> = self.settings.home_tiles.iter().map(|t| t.url.clone()).collect();
+        urls.extend(self.history.top_sites(8).into_iter().map(|(_, url, _, _)| url));
+        let mut todo = Vec::new();
+        for url in urls {
+            let host = icons::host_key(&url);
+            if host.is_empty() || self.icons_pending.contains(&host) {
+                continue;
+            }
+            match icons::cached(&host) {
+                Some((data, fresh)) => {
+                    self.icon_map.insert(host.clone(), data);
+                    if !fresh {
+                        todo.push((host, url));
+                    }
+                }
+                None => todo.push((host, url)),
+            }
+        }
+        for (h, _) in &todo {
+            self.icons_pending.insert(h.clone());
+        }
+        if !todo.is_empty() {
+            let p = self.proxy.clone();
+            std::thread::spawn(move || {
+                for (host, url) in todo {
+                    let _ = p.send_event(UserEvent::Icon(host, icons::fetch(&url)));
+                }
+            });
+        }
+    }
+
+    fn send_icons(&self) {
+        let map = if self.settings.site_icons { serde_json::json!(self.icon_map) } else { serde_json::json!({}) };
+        self.ui_eval(&format!("fx.icons({map})"));
     }
 
     fn ext_refresh(&mut self) {
