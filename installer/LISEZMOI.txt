@@ -1,12 +1,14 @@
-FERROX - navigateur leger et securise (Rust)
+FERROX - navigateur leger et securise (Rust + moteur Chromium integre)
 
 Installation : lancer Ferrox-Setup-<version>.exe (aucun droit administrateur requis).
 Version portable : double-cliquer sur Ferrox.exe
-Garder WebView2Loader.dll dans le meme dossier.
+Garder tous les fichiers du dossier ensemble (ferrox.dll, libcef.dll, locales\...) :
+c'est le moteur Chromium de Ferrox.
 
-Prerequis : Windows 10 ou 11 64 bits (WebView2 est deja inclus).
+Prerequis : Windows 10 ou 11 64 bits. Rien d'autre a installer.
 Si Windows affiche "Windows a protege votre ordinateur" : Informations complementaires > Executer quand meme
 (l application n est pas signee numeriquement).
 
 Parametres : %APPDATA%\ferrox\settings.json
 Liste de blocage perso : %APPDATA%\ferrox\blocklist.txt
+Profil du navigateur (cookies, cache) : %LOCALAPPDATA%\ferrox\profile\chromium

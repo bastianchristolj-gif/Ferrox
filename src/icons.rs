@@ -19,7 +19,7 @@ pub fn host_key(url: &str) -> String {
 
 fn cache_path(host: &str) -> Option<PathBuf> {
     let ok = !host.is_empty() && host.len() < 200 && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
-    ok.then(|| crate::extensions::ext_dir().with_file_name("icons").join(format!("{host}.txt")))
+    ok.then(|| crate::config::data_dir().with_file_name("icons").join(format!("{host}.txt")))
 }
 
 /// Icône en cache : (data URL, encore fraîche ?).
@@ -202,7 +202,7 @@ pub fn fetch(page_url: &str, service: bool) -> Option<String> {
         if !ok {
             return None;
         }
-        let bytes = get(&crate::extensions::http_agent(), &format!("https://icons.duckduckgo.com/ip3/{host}.ico"), MAX_ICON)?;
+        let bytes = get(&http_agent(), &format!("https://icons.duckduckgo.com/ip3/{host}.ico"), MAX_ICON)?;
         // le service renvoie une icône grise générique pour les sites inconnus (~ 100 octets)
         if bytes.len() < 200 {
             return None;
@@ -212,13 +212,8 @@ pub fn fetch(page_url: &str, service: bool) -> Option<String> {
     })
 }
 
-/// Icône PNG fournie par le moteur → data URL.
-pub fn png_data_url(bytes: &[u8]) -> String {
-    format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
-}
-
 fn fetch_one(page_url: &str) -> Option<String> {
-    let agent = crate::extensions::http_agent();
+    let agent = http_agent();
     let mut candidates = Vec::new();
     if let Some(html) = get(&agent, page_url, MAX_PAGE) {
         candidates = parse_icons(&String::from_utf8_lossy(&html), page_url);
@@ -309,4 +304,16 @@ mod net_tests {
             }
         }
     }
+}
+
+/// Client HTTPS (certificats vérifiés par Windows via SChannel).
+pub(crate) fn http_agent() -> ureq::Agent {
+    use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
+    ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(30)))
+        .max_redirects(8)
+        .tls_config(TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build())
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0 Safari/537.36")
+        .build()
+        .into()
 }

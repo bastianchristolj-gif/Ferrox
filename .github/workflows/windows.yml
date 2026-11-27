@@ -5,12 +5,16 @@ name: Windows
 #   l'étiquette vX.Y.Z et publie la Release (installateur, zip, empreintes SHA-256).
 on:
   push:
-    branches: [main]
+    branches: [main, cef]
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  # Binaires du moteur Chromium (CEF), téléchargés une fois puis gardés en cache.
+  CEF_PATH: ${{ github.workspace }}\..\cef
 
 jobs:
   build:
@@ -18,32 +22,86 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Outils (Ninja, NSIS, rcedit)
+        shell: pwsh
+        run: |
+          choco install ninja nsis -y --no-progress
+          Invoke-WebRequest -Uri https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe -OutFile "$env:RUNNER_TEMP\rcedit.exe"
+      - name: Cache du moteur Chromium (CEF)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}\..\cef
+          key: cef-windows-${{ hashFiles('Cargo.lock') }}
       - name: Compiler (release)
         run: cargo build --release
       - name: Tests
-        run: cargo test --release
+        shell: pwsh
+        run: |
+          # les tests chargent libcef.dll, copiée à côté des binaires par la compilation
+          $env:PATH = "$PWD\target\release;$env:PATH"
+          cargo test --release
       - name: Empaqueter + installateur (NSIS)
         shell: pwsh
         run: |
-          choco install nsis -y --no-progress
           $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
-          New-Item -ItemType Directory -Force dist/Ferrox | Out-Null
-          Copy-Item target/release/ferrox.exe dist/Ferrox/Ferrox.exe
-          $dll = Get-ChildItem -Recurse target/release/build -Filter WebView2Loader.dll | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
-          Copy-Item $dll.FullName dist/Ferrox/
-          Copy-Item installer/LISEZMOI.txt dist/Ferrox/
+          $rel = "target/release"
+          $out = "dist/Ferrox"
+          New-Item -ItemType Directory -Force "$out/locales" | Out-Null
+
+          # Ferrox.exe = lanceur « bootstrap » de CEF (bac à sable) : il charge ferrox.dll.
+          $boot = Get-ChildItem -Recurse $rel, $env:CEF_PATH -Filter bootstrap.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $boot) { Write-Error "bootstrap.exe introuvable"; exit 1 }
+          Copy-Item $boot.FullName "$out/Ferrox.exe"
+          & "$env:RUNNER_TEMP\rcedit.exe" "$out/Ferrox.exe" `
+            --set-icon assets/ferrox.ico `
+            --set-file-version "$v" --set-product-version "$v" `
+            --set-version-string ProductName Ferrox `
+            --set-version-string FileDescription "Ferrox" `
+            --set-version-string CompanyName Ferrox `
+            --set-version-string LegalCopyright "Licence MIT" `
+            --set-version-string OriginalFilename Ferrox.exe `
+            --set-version-string InternalName Ferrox
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item "$rel/ferrox.dll" "$out/ferrox.dll"
+
+          # Moteur Chromium : bibliothèques, ressources et langues (français + anglais).
+          $cef = $boot.Directory.FullName
+          foreach ($f in Get-ChildItem $cef -File) {
+            if ($f.Extension -in '.dll', '.pak', '.bin', '.dat', '.json') { Copy-Item $f.FullName "$out/" }
+          }
+          foreach ($l in 'fr.pak', 'en-US.pak') {
+            $p = Get-ChildItem -Recurse $cef, $rel -Filter $l -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -eq 'locales' } | Select-Object -First 1
+            if ($p) { Copy-Item $p.FullName "$out/locales/" }
+          }
+          foreach ($need in 'libcef.dll', 'icudtl.dat', 'resources.pak', 'v8_context_snapshot.bin', 'chrome_elf.dll') {
+            if (-not (Test-Path "$out/$need")) { Write-Error "fichier du moteur manquant : $need"; exit 1 }
+          }
+          Copy-Item installer/LISEZMOI.txt "$out/"
+          Get-ChildItem -Recurse $out | Format-Table -AutoSize Length, FullName
+
+          # Désinstallation : supprime exactement les fichiers installés.
+          $lines = Get-ChildItem -Recurse -File $out | ForEach-Object {
+            $r = $_.FullName.Substring((Resolve-Path $out).Path.Length + 1)
+            "  Delete `"`$INSTDIR\$r`""
+          }
+          $lines += '  RMDir "$INSTDIR\locales"'
+          $lines | Out-File -Encoding utf8 installer/files.nsh
+
           & "C:\Program Files (x86)\NSIS\makensis.exe" -V2 "-DVERSION=$v" installer/ferrox.nsi
           if ($LASTEXITCODE -ne 0) { exit 1 }
           # Paquet de distribution : installateur + version portable + empreintes SHA-256
           $pkg = "dist/Ferrox-$v-windows"
           New-Item -ItemType Directory -Force "$pkg/Ferrox-portable" | Out-Null
-          Copy-Item dist/Ferrox/* "$pkg/Ferrox-portable/"
+          Copy-Item -Recurse "$out/*" "$pkg/Ferrox-portable/"
           Copy-Item "dist/Ferrox-Setup-$v.exe" "$pkg/"
           Push-Location $pkg
           $sums = Get-ChildItem -Recurse -File | Sort-Object FullName | ForEach-Object {
-            $rel = (Resolve-Path -Relative $_.FullName).TrimStart('.', '\').Replace('\', '/')
-            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $rel
+            $r = (Resolve-Path -Relative $_.FullName).TrimStart('.', '\').Replace('\', '/')
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $r
           }
           $sums | Out-File -Encoding ascii SHA256SUMS.txt
           Pop-Location

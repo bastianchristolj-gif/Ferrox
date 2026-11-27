@@ -1,9 +1,8 @@
 //! Mesure de la RAM / CPU consommés par le navigateur et ses sous-processus,
 //! avec une répartition par rôle (interface, pages web, GPU, réseau, extensions…).
 //!
-//! - Windows : WebView2 lance des `msedgewebview2.exe` ; leur rôle se lit dans la
-//!   ligne de commande (`--type=renderer`, `--type=gpu-process`…).
-//! - Linux : WebKitGTK lance `WebKitWebProcess`, `WebKitNetworkProcess`…
+//! Chromium (CEF) lance des sous-processus `Ferrox.exe` ; leur rôle se lit dans la ligne de
+//! commande (`--type=renderer`, `--type=gpu-process`…).
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -20,7 +19,6 @@ pub struct Monitor {
 
 /// Mémoire « privée » d'un processus, comme le Gestionnaire des tâches :
 /// sans les bibliothèques partagées comptées plusieurs fois.
-#[cfg(target_os = "windows")]
 fn private_mem(pid: u32) -> Option<u64> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX2};
@@ -37,19 +35,6 @@ fn private_mem(pid: u32) -> Option<u64> {
         CloseHandle(h);
         (ok && c.PrivateWorkingSetSize > 0).then_some(c.PrivateWorkingSetSize as u64)
     }
-}
-
-/// Linux : PSS (mémoire partagée divisée entre les processus qui la partagent).
-#[cfg(target_os = "linux")]
-fn private_mem(pid: u32) -> Option<u64> {
-    let t = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
-    let kb: u64 = t.lines().find(|l| l.starts_with("Pss:"))?.split_whitespace().nth(1)?.parse().ok()?;
-    Some(kb * 1024)
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
-fn private_mem(_pid: u32) -> Option<u64> {
-    None
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -73,40 +58,22 @@ pub struct Usage {
     pub per_pid: HashMap<u32, (u64, f32)>,
 }
 
-fn classify(name: &str, cmd: &str, is_me: bool) -> (&'static str, &'static str) {
-    let n = name.to_ascii_lowercase();
+fn classify(cmd: &str, is_me: bool) -> (&'static str, &'static str) {
     if is_me {
-        return ("ui", "Interface Ferrox");
+        return ("ui", "Ferrox (interface et moteur)");
     }
-    if n.contains("webkitwebproc") {
-        return ("pages", "Pages web");
-    }
-    if n.contains("webkitnetwork") {
-        return ("network", "Réseau");
-    }
-    if n.contains("webkitgpu") {
-        return ("gpu", "Carte graphique");
-    }
-    if n.contains("bwrap") || n.contains("dbus-proxy") {
-        return ("sandbox", "Bac à sable");
-    }
-    if n.contains("msedgewebview2") {
+    // Sous-processus de Chromium : tous des « Ferrox.exe », rôle donné par `--type=`.
+    if cmd.contains("--type=renderer") {
         if cmd.contains("--extension-process") {
             return ("ext", "Extensions");
         }
-        if cmd.contains("--type=renderer") {
-            return ("pages", "Pages web");
-        }
-        if cmd.contains("--type=gpu-process") {
-            return ("gpu", "Carte graphique");
-        }
-        if cmd.contains("network.mojom") {
-            return ("network", "Réseau");
-        }
-        if cmd.contains("--type=") {
-            return ("other", "Services (audio, stockage…)");
-        }
-        return ("engine", "Moteur WebView2");
+        return ("pages", "Pages web");
+    }
+    if cmd.contains("--type=gpu-process") {
+        return ("gpu", "Carte graphique");
+    }
+    if cmd.contains("network.mojom") {
+        return ("network", "Réseau");
     }
     ("other", "Services (audio, stockage…)")
 }
@@ -167,7 +134,7 @@ impl Monitor {
             }
             let cpu = p.cpu_usage() / self.ncpu;
             let cmd: String = p.cmd().iter().map(|s| s.to_string_lossy()).collect::<Vec<_>>().join(" ");
-            let (key, label) = classify(&p.name().to_string_lossy(), &cmd, *pid == self.me);
+            let (key, label) = classify(&cmd, *pid == self.me);
             let mem = private_mem(pid.as_u32()).unwrap_or_else(|| p.memory());
             let c = cats.entry(key).or_insert(Category { key, label, ram_mb: 0, cpu: 0.0, procs: 0 });
             c.ram_mb += mem;

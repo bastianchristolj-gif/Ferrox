@@ -6,7 +6,7 @@
 ;    aucun droit administrateur, pas de fenêtre UAC.
 ;  - Raccourci menu Démarrer (+ bureau en option), désinstallateur enregistré
 ;    dans « Applications installées ».
-;  - Vérifie la présence du moteur Microsoft Edge WebView2.
+;  - Moteur Chromium (CEF) inclus : aucun prérequis à installer.
 ; =============================================================================
 
 Unicode true
@@ -20,8 +20,6 @@ ManifestDPIAware true
 !define EXE       "Ferrox.exe"
 !define PUBLISHER "Ferrox"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP}"
-!define WEBVIEW2_GUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-!define WEBVIEW2_URL  "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 
 Name "${APP}"
 OutFile "..\dist\Ferrox-Setup-${VERSION}.exe"
@@ -60,6 +58,7 @@ VIAddVersionKey /LANG=1036 "LegalCopyright"  "Licence MIT"
 ; --- Pages d'installation
 !define MUI_WELCOMEPAGE_TITLE "Bienvenue dans l'installation de ${APP}"
 !define MUI_WELCOMEPAGE_TEXT "${APP} est un navigateur web léger et sécurisé, écrit en Rust.$\r$\n$\r$\n\
+  • Moteur Chromium intégré, isolé dans un bac à sable$\r$\n\
   • Bloqueur de publicités et de traqueurs intégré$\r$\n\
   • Limiteur de RAM et mise en veille des onglets$\r$\n\
   • Aucun droit administrateur nécessaire$\r$\n$\r$\n\
@@ -104,34 +103,10 @@ FunctionEnd
 !insertmacro CLOSE_FERROX ""
 !insertmacro CLOSE_FERROX "un."
 
-; Vrai si le moteur WebView2 est installé (machine ou utilisateur).
-Function HasWebView2
-  StrCpy $0 ""
-  SetRegView 64
-  ReadRegStr $0 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_GUID}" "pv"
-  ${If} $0 == ""
-  ${OrIf} $0 == "0.0.0.0"
-    ReadRegStr $0 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_GUID}" "pv"
-  ${EndIf}
-  ${If} $0 == ""
-  ${OrIf} $0 == "0.0.0.0"
-    ReadRegStr $0 HKCU "Software\Microsoft\EdgeUpdate\Clients\${WEBVIEW2_GUID}" "pv"
-  ${EndIf}
-  SetRegView lastused
-  ${If} $0 == "0.0.0.0"
-    StrCpy $0 ""
-  ${EndIf}
-FunctionEnd
-
 Function .onInit
   ${IfNot} ${RunningX64}
     MessageBox MB_ICONSTOP "${APP} nécessite Windows 10 ou 11 en 64 bits."
     Abort
-  ${EndIf}
-  Call HasWebView2
-  ${If} $0 == ""
-    MessageBox MB_YESNO|MB_ICONEXCLAMATION "Le moteur « Microsoft Edge WebView2 » est introuvable sur cet ordinateur.$\r$\n${APP} en a besoin pour afficher les pages web.$\r$\n$\r$\nOuvrir la page de téléchargement de Microsoft ?$\r$\n(Installez-le, puis relancez cette installation.)" IDNO +2
-    ExecShell "open" "${WEBVIEW2_URL}"
   ${EndIf}
 FunctionEnd
 
@@ -144,9 +119,8 @@ Section "${APP} (obligatoire)" SecMain
   Call CloseFerrox
 
   SetOutPath "$INSTDIR"
-  File "..\dist\Ferrox\${EXE}"
-  File "..\dist\Ferrox\WebView2Loader.dll"
-  File "..\dist\Ferrox\LISEZMOI.txt"
+  ; Ferrox.exe, ferrox.dll et le moteur Chromium (libcef.dll, ressources, langues…)
+  File /r "..\dist\Ferrox\*.*"
   ; Icône au nom versionné : Windows n'a aucune image en cache pour ce nouveau fichier,
   ; les raccourcis affichent donc forcément le logo de cette version.
   Delete "$INSTDIR\Ferrox-*.ico"
@@ -203,9 +177,8 @@ Section "Uninstall"
   Call un.CloseFerrox
 
   ; Uniquement nos fichiers (jamais de suppression récursive du dossier d'installation)
-  Delete "$INSTDIR\${EXE}"
-  Delete "$INSTDIR\WebView2Loader.dll"
-  Delete "$INSTDIR\LISEZMOI.txt"
+  ; liste générée à la compilation à partir des fichiers réellement installés
+  !include "files.nsh"
   Delete "$INSTDIR\Desinstaller.exe"
   Delete "$INSTDIR\Ferrox-*.ico"
   RMDir "$INSTDIR"
@@ -219,7 +192,7 @@ Section "Uninstall"
 
   ; Données personnelles : seulement si l'utilisateur le demande (non par défaut)
   ${IfNot} ${Silent}
-    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Supprimer aussi vos données ${APP} ?$\r$\n$\r$\nParamètres, historique, session, cookies et extensions.$\r$\nChoisissez « Non » pour les retrouver si vous réinstallez ${APP}." IDNO keep
+    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Supprimer aussi vos données ${APP} ?$\r$\n$\r$\nParamètres, historique, session et cookies.$\r$\nChoisissez « Non » pour les retrouver si vous réinstallez ${APP}." IDNO keep
     RMDir /r "$APPDATA\ferrox"
     RMDir /r "$LOCALAPPDATA\ferrox"
     keep:

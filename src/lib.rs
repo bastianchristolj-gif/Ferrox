@@ -2,24 +2,23 @@
 //!
 //! Architecture :
 //! - une fenêtre native (tao) ;
-//! - une WebView "interface" (onglets, barre d'adresse, barre latérale, panneaux)
+//! - une vue "interface" (onglets, barre d'adresse, barre latérale, panneaux)
 //!   qui couvre toute la fenêtre ;
-//! - une WebView par onglet, posée par-dessus dans la zone de contenu.
-//!   Le moteur de rendu est celui du système (WebKitGTK / WebView2 / WKWebView) :
-//!   aucun Chromium embarqué → binaire de quelques Mo et RAM réduite.
-//! - Les onglets en arrière-plan sont mis en veille (WebView détruite, URL conservée).
-
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//! - une vue par onglet, posée par-dessus dans la zone de contenu.
+//!   Le moteur est Chromium, embarqué avec Ferrox (CEF) : tous les processus du navigateur
+//!   sont des processus Ferrox, isolés dans le bac à sable de Chromium.
+//! - Les onglets en arrière-plan sont mis en veille (vue détruite, URL conservée).
 
 mod blocker;
 mod config;
-mod extensions;
+mod engine;
 mod history;
 mod icons;
 mod monitor;
 
 use blocker::Blocker;
 use config::Settings;
+use engine::{Bounds, Hooks, View, ViewOptions};
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -29,11 +28,6 @@ use tao::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
-};
-use wry::{
-    BackgroundThrottlingPolicy, NewWindowResponse, PageLoadEvent, PermissionKind,
-    PermissionResponse, Rect, WebContext, WebView, WebViewBuilder,
-    dpi::{LogicalPosition, LogicalSize as WLogicalSize},
 };
 
 /// Hauteur barre d'onglets (36) + barre de navigation (38).
@@ -50,7 +44,7 @@ const SETTINGS_URL: &str = "ferrox://settings";
 const EXT_URL: &str = "ferrox://extensions";
 const HISTORY_URL: &str = "ferrox://history";
 
-/// Pages internes dessinées par l'interface elle-même (aucune WebView web).
+/// Pages internes dessinées par l'interface elle-même (aucune vue web).
 fn internal_page(url: &str) -> Option<&'static str> {
     match url {
         SETTINGS_URL => Some("settings"),
@@ -60,8 +54,10 @@ fn internal_page(url: &str) -> Option<&'static str> {
     }
 }
 
-fn valid_ext_id(id: &str) -> bool {
-    id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
+/// Document HTML chargé par Ferrox (interface, page d'accueil).
+fn data_url(html: &str) -> String {
+    use base64::Engine;
+    format!("data:text/html;charset=utf-8;base64,{}", base64::engine::general_purpose::STANDARD.encode(html))
 }
 
 // ---------------------------------------------------------------------------
@@ -69,31 +65,32 @@ fn valid_ext_id(id: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-enum UserEvent {
+pub enum UserEvent {
     Ui(String),
     Title(u64, String),
-    Load(u64, bool, String),
+    /// (onglet, en cours de chargement ?, adresse, précédent possible, suivant possible)
+    Load(u64, bool, String, bool, bool),
+    /// Nouvelle adresse du document principal (y compris sans rechargement).
+    Address(u64, String),
     OpenTab(String),
     Blocked(u64, u32),
     Key(u64, String),
     NavBlocked(u64, String),
     HttpBlocked(u64, String),
     Download(String, bool),
-    ExtDownloaded(Result<std::path::PathBuf, String>),
-    ExtAdded(Result<String, String>),
-    ExtList(Vec<(String, String, bool)>),
-    ExtChanged(Option<String>, bool),
     Favicon(u64, String),
     NetBlocked(u64),
     Icon(String, Option<String>),
-    EngineIcon(u64, Vec<u8>),
-    Renderers(Vec<(u32, Vec<u32>)>),
     HomeTiles(u64, Vec<config::Tile>),
     Fullscreen(u64, bool),
-    ClosePopup,
     OpenTabWith(String, bool),
     SearchTab(String),
+    /// Le navigateur de la vue a été créé par le moteur.
+    Created(u64),
+    /// Processus de rendu qui affiche l'onglet.
+    TabPid(u64, u32),
+    /// Un navigateur du moteur s'est fermé.
+    BrowserClosed,
 }
 
 /// Commandes envoyées par l'interface (JSON). Tout champ inattendu est rejeté.
@@ -120,9 +117,14 @@ enum UiCmd {
     Quit,
     Resize { dir: String },
     OpenPage { name: String },
+    // Page Extensions (non disponible avec CEF) : acceptées pour afficher un message.
+    #[allow(dead_code)]
     ExtInstall { input: String },
+    #[allow(dead_code)]
     ExtRemove { id: String },
+    #[allow(dead_code)]
     ExtEnable { id: String, on: bool },
+    #[allow(dead_code)]
     ExtOpen { id: String, page: String },
     OpenUrl { url: String },
     ClosePopup,
@@ -145,7 +147,7 @@ struct Tab {
     id: u64,
     title: String,
     url: String,
-    wv: Option<WebView>,
+    wv: Option<View>,
     last_active: Instant,
     private: bool,
     loading: bool,
@@ -154,15 +156,13 @@ struct Tab {
     zoom: u32,
     can_back: bool,
     can_fwd: bool,
-    /// Identifiant du cadre principal (Windows) pour mesurer la RAM de l'onglet.
-    frame_id: Option<u32>,
-    /// Onglet suspendu par le moteur (Windows).
-    suspended: bool,
-    /// Requêtes bloquées au niveau réseau sur la page actuelle (Windows).
+    /// Processus de rendu de l'onglet (RAM par onglet).
+    pid: Option<u32>,
+    /// Requêtes bloquées au niveau réseau sur la page actuelle.
     blocked_net: u32,
 }
 
-/// Drapeaux partagés avec les callbacks des WebViews (qui doivent être 'static).
+/// Drapeaux partagés avec les rappels du moteur (autres threads).
 #[derive(Clone)]
 struct Shared {
     blocker: Arc<Blocker>,
@@ -174,12 +174,16 @@ struct Shared {
     download_dir: Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
 }
 
+/// Que faire une fois tous les navigateurs du moteur fermés.
+#[derive(Clone, Copy, PartialEq)]
+enum Exit {
+    Quit,
+    Restart,
+}
+
 struct App {
     window: Window,
-    #[cfg(target_os = "linux")]
-    fixed: gtk::Fixed,
-    ui: WebView,
-    ctx: WebContext,
+    ui: View,
     tabs: Vec<Tab>,
     active: Option<u64>,
     next_id: u64,
@@ -191,7 +195,6 @@ struct App {
     usage: monitor::Usage,
     blocked_total: u64,
     notice: Option<serde_json::Value>,
-    exts: Vec<extensions::ExtInfo>,
     /// (en cours ?, message) affiché sur la page Extensions.
     ext_status: Option<(bool, String)>,
     /// Rayon des coins arrondis par Windows 11 (0 ailleurs).
@@ -201,119 +204,129 @@ struct App {
     /// Vraies icônes des sites (hôte → data URL), pour l'accueil et l'interface.
     icon_map: std::collections::HashMap<String, String>,
     icons_pending: std::collections::HashSet<String>,
-    /// Domaines bloqués au niveau réseau (Windows).
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    net_domains: Vec<String>,
     /// Onglets fermés récemment (Ctrl+Maj+T).
     closed: Vec<String>,
     /// Plein écran (vidéo ou F11) : le contenu occupe toute la fenêtre.
     fullscreen: bool,
-    /// Fenêtre d'extension affichée sous le bouton Extensions (Windows).
-    popup: Option<WebView>,
     /// Réglages lus au démarrage qui exigent un redémarrage pour changer.
-    boot_flags: (bool, bool, bool),
+    boot_flags: (bool, bool, bool, bool),
     session_dirty: bool,
-    ubo_checked: bool,
     history: history::History,
-    /// Processus de rendu → cadres principaux (Windows).
-    renderers: Vec<(u32, Vec<u32>)>,
     focused: bool,
     ticks: u32,
     last_state: std::cell::RefCell<String>,
+    /// Fermeture en cours (on attend que le moteur ait fermé ses navigateurs).
+    exiting: Option<(Exit, Instant)>,
 }
 
-fn main() {
-    // Sandbox des processus web WebKitGTK (bubblewrap) si disponible.
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_FORCE_SANDBOX").is_none() && which("bwrap") {
-        // SAFETY: appelé au tout début de main, avant la création de tout thread.
-        unsafe { std::env::set_var("WEBKIT_FORCE_SANDBOX", "1") };
+/// Point d'entrée Windows, appelé par Ferrox.exe (lanceur `bootstrap.exe` de CEF) pour chacun
+/// des processus du navigateur. Le lanceur fournit les informations du bac à sable.
+///
+/// # Safety
+/// Appelé une seule fois par processus, par le lanceur de CEF, avec des arguments valides.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn RunWinMain(
+    instance: cef::sys::HINSTANCE,
+    _command_line: *const u8,
+    _command_show: i32,
+    sandbox_info: *mut u8,
+) -> i32 {
+    run(cef::MainArgs { instance }, sandbox_info)
+}
+
+fn is_subprocess() -> bool {
+    std::env::args().skip(1).any(|a| a.starts_with("--type="))
+}
+
+fn run(main_args: cef::MainArgs, sandbox_info: *mut u8) -> i32 {
+    if is_subprocess() {
+        // Processus de rendu, GPU, réseau… : aucun accès aux réglages ni aux fichiers de Ferrox.
+        return engine::start(&main_args, sandbox_info, None, Default::default()).unwrap_or(0);
+    }
+
+    let settings = Settings::load();
+    let settings_boot = settings.clone();
+    let cache = config::data_dir().join("chromium");
+    if settings.clear_on_exit {
+        // Données de navigation effacées : le profil est supprimé avant le démarrage du moteur.
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+    let _ = std::fs::create_dir_all(&cache);
+    let boot = engine::BootOptions {
+        eco_mode: settings.eco_mode,
+        allow_autoplay: settings.allow_autoplay,
+        hardware_accel: settings.hardware_accel,
+        anti_fingerprint: settings.anti_fingerprint,
+    };
+    if let Some(code) = engine::start(&main_args, sandbox_info, Some(boot), cache) {
+        return code;
     }
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
-    let settings = Settings::load();
-    let settings_boot = settings.clone();
-    // Arguments du moteur (identiques pour toutes les vues, fixés au démarrage).
-    let _ = BROWSER_ARGS.set(browser_args(&settings));
 
-    let window = WindowBuilder::new()
-        .with_title("Ferrox")
-        .with_decorations(false) // barre de titre intégrée aux onglets
-        .with_inner_size(LogicalSize::new(1280.0, 800.0))
-        .with_min_inner_size(LogicalSize::new(640.0, 400.0))
-        .with_window_icon(app_icon());
-    #[cfg(target_os = "windows")]
     let window = {
         use tao::platform::windows::WindowBuilderExtWindows;
-        window
+        WindowBuilder::new()
+            .with_title("Ferrox")
+            .with_decorations(false) // barre de titre intégrée aux onglets
+            .with_inner_size(LogicalSize::new(1280.0, 800.0))
+            .with_min_inner_size(LogicalSize::new(640.0, 400.0))
+            .with_window_icon(app_icon())
             .with_undecorated_shadow(true) // ombre native Windows malgré l'absence de bordure
             // Grande icône (barre des tâches, Alt+Tab) fixée par Ferrox lui-même : elle ne dépend
-            // pas du cache d'icônes de Windows, qui peut garder une ancienne version de l'exe.
+            // pas du cache d'icônes de Windows.
             .with_taskbar_icon(taskbar_icon())
+            .build(&event_loop)
+            .unwrap_or_else(|e| fatal(&format!("Impossible de créer la fenêtre : {e}")))
     };
-    let window = window
-        .build(&event_loop)
-        .unwrap_or_else(|e| fatal(&format!("Impossible de créer la fenêtre : {e}")));
-
-    #[cfg(target_os = "linux")]
-    let fixed = {
-        use gtk::prelude::*;
-        use tao::platform::unix::WindowExtUnix;
-        let fixed = gtk::Fixed::new();
-        let vbox = window.default_vbox().expect("vbox GTK");
-        vbox.pack_start(&fixed, true, true, 0);
-        fixed.show_all();
-        fixed
-    };
-
-    let _ = std::fs::create_dir_all(config::data_dir());
-    // Un seul contexte (et donc un seul processus réseau) pour l'interface et les onglets.
-    let mut ctx = WebContext::new(Some(config::data_dir()));
+    {
+        use tao::platform::windows::WindowExtWindows;
+        engine::set_proxy(proxy.clone(), window.hwnd());
+    }
 
     // Clé de l'interface : remise au script de l'interface après son chargement ; toute
     // commande sans elle est ignorée (aucun autre script ne peut piloter Ferrox).
     let ui_token = secret();
     let ui = {
-        let p = proxy.clone();
         let tok = format!("{ui_token}|");
-        let builder = WebViewBuilder::new_with_web_context(&mut ctx)
-            .with_html(UI_HTML)
-            .with_bounds(full_rect(&window))
-            .with_background_color((18, 16, 25, 255))
-            .with_devtools(cfg!(debug_assertions))
-            .with_hotkeys_zoom(false)
-            .with_ipc_handler(move |req| {
-                // Uniquement depuis la page de l'interface (document about:blank de Ferrox).
-                if !req.uri().to_string().starts_with("about:blank") {
-                    return;
-                }
-                let body = req.into_body();
-                if body.len() > 64 * 1024 {
+        let hooks = Hooks {
+            on_message: Arc::new(move |body: &str, url: &str| {
+                // Uniquement depuis le document de l'interface chargé par Ferrox.
+                if !url.starts_with("data:text/html") {
                     return;
                 }
                 if let Some(cmd) = body.strip_prefix(tok.as_str()) {
-                    let _ = p.send_event(UserEvent::Ui(cmd.to_string()));
+                    // Déplacer / redimensionner la fenêtre : la vue rend d'abord la souris.
+                    if cmd.contains(r#""cmd":"drag""#) || cmd.contains(r#""cmd":"resize""#) {
+                        engine::release_capture();
+                    }
+                    engine::emit(UserEvent::Ui(cmd.to_string()));
                 } else if body == r#"{"cmd":"ready"}"# {
                     // seul message accepté sans clé : il déclenche la remise de la clé
-                    let _ = p.send_event(UserEvent::Ui(body));
+                    engine::emit(UserEvent::Ui(body.to_string()));
                 }
-            })
+            }),
             // L'interface ne doit jamais naviguer ailleurs.
-            .with_navigation_handler(|url| url.starts_with("about:") || url.starts_with("data:"))
-            .with_new_window_req_handler(|_, _| NewWindowResponse::Deny);
-        #[cfg(target_os = "windows")]
-        let builder = {
-            use wry::WebViewBuilderExtWindows;
-            builder.with_default_context_menus(false).with_browser_accelerator_keys(false)
+            allow_nav: Arc::new(|url: &str| url.starts_with("data:text/html") || url.starts_with("about:")),
+            block_request: None,
+            on_popup: Arc::new(|_| {}),
+            download_dir: Default::default(),
+            block_perms: Arc::new(AtomicBool::new(true)),
         };
-        build(builder, &window, #[cfg(target_os = "linux")] &fixed).unwrap_or_else(|e| {
-            fatal(&format!(
-                "Impossible de démarrer le moteur web.\n\n{e}\n\n\
-                 Sous Windows, installez « Microsoft Edge WebView2 Runtime » \
-                 (https://go.microsoft.com/fwlink/p/?LinkId=2124703) puis relancez Ferrox."
-            ))
-        })
+        View::new(
+            ViewOptions {
+                id: 0,
+                url: data_url(UI_HTML),
+                init: UI_INIT.into(),
+                private: false,
+                bounds: full_bounds(&window),
+                visible: true,
+                zoom: 100,
+                ui: true,
+            },
+            hooks,
+        )
     };
 
     let blocker = Arc::new(Blocker::load());
@@ -327,13 +340,9 @@ fn main() {
         download_dir: Arc::new(std::sync::Mutex::new(download_dir_of(&settings))),
     };
 
-    let net_domains = shared.blocker.domains();
     let mut app = App {
         window,
-        #[cfg(target_os = "linux")]
-        fixed,
         ui,
-        ctx,
         tabs: Vec::new(),
         active: None,
         next_id: 1,
@@ -344,45 +353,31 @@ fn main() {
         monitor: monitor::Monitor::new(),
         usage: Default::default(),
         blocked_total: 0,
-        exts: Vec::new(),
         ext_status: None,
         corner_radius: 0,
         ui_token,
-        net_domains,
         icon_map: Default::default(),
         icons_pending: Default::default(),
         closed: Vec::new(),
         fullscreen: false,
-        popup: None,
-        boot_flags: (settings_boot.allow_autoplay, settings_boot.hardware_accel, settings_boot.eco_mode),
+        boot_flags: boot_flags(&settings_boot),
         session_dirty: false,
-        ubo_checked: false,
         history: history::History::load(),
-        renderers: Vec::new(),
         focused: true,
         ticks: 0,
         last_state: Default::default(),
         notice: None,
+        exiting: None,
     };
 
-    #[cfg(target_os = "windows")]
-    {
-        // Windows 11 : coins arrondis + bordure native à la couleur d'accent (suit l'arrondi).
-        if winstyle::round_corners(&app.window) {
-            app.corner_radius = 8;
-        }
-        winstyle::border_color(&app.window, &app.settings.accent);
+    // Windows 11 : coins arrondis + bordure native à la couleur d'accent (suit l'arrondi).
+    if winstyle::round_corners(&app.window) {
+        app.corner_radius = 8;
     }
-
-    if app.settings.clear_on_exit {
-        // Filet de sécurité : si l'effacement à la fermeture n'a pas eu le temps de finir.
-        let _ = app.ui.clear_all_browsing_data();
-    }
-    #[cfg(target_os = "windows")]
-    extensions::wv2::set_autofill(&app.ui, app.settings.autofill, app.settings.save_passwords);
+    winstyle::border_color(&app.window, &app.settings.accent);
 
     app.refresh_icons();
-    let start = std::env::args().nth(1).map(|a| app.resolve_input(&a));
+    let start = std::env::args().skip(1).find(|a| !a.starts_with("--")).map(|a| app.resolve_input(&a));
     let session = config::Session::load();
     if let Some(url) = start {
         app.new_tab(url, false);
@@ -412,10 +407,11 @@ fn main() {
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => app.quit(),
             Event::WindowEvent { event: WindowEvent::Resized(_), .. } => app.layout(),
+            Event::WindowEvent { event: WindowEvent::ScaleFactorChanged { .. }, .. } => app.layout(),
             Event::WindowEvent { event: WindowEvent::Focused(f), .. } => app.focused = f,
             Event::UserEvent(ev) => app.on_event(ev),
             Event::NewEvents(tao::event::StartCause::ResumeTimeReached { .. }) => {
-                next_tick = Instant::now() + TICK;
+                next_tick = Instant::now() + if app.exiting.is_some() { Duration::from_millis(100) } else { TICK };
                 *control_flow = ControlFlow::WaitUntil(next_tick);
                 app.tick();
             }
@@ -424,7 +420,14 @@ fn main() {
     });
 }
 
-#[cfg(target_os = "windows")]
+fn boot_flags(s: &Settings) -> (bool, bool, bool, bool) {
+    (s.allow_autoplay, s.hardware_accel, s.eco_mode, s.anti_fingerprint)
+}
+
+/// Script d'initialisation de l'interface : expose la fonction native d'envoi à la seule page
+/// de l'interface (document de Ferrox, aucun contenu tiers).
+const UI_INIT: &str = "(function (send) { Object.defineProperty(window, '__fxPost', { value: send, configurable: false, writable: false, enumerable: false }); })";
+
 mod winstyle {
     use tao::platform::windows::WindowExtWindows;
     use windows_sys::Win32::Graphics::Dwm::{
@@ -448,11 +451,8 @@ mod winstyle {
     }
 }
 
-/// Quitte le processus de façon garantie.
-/// Sous Windows, la sortie normale décharge les bibliothèques du moteur WebView2, ce qui peut
-/// rester bloqué : un chien de garde termine le processus si la sortie n'a pas abouti en 1,5 s.
+/// Quitte le processus de façon garantie (chien de garde si la sortie normale reste bloquée).
 fn exit_now() -> ! {
-    #[cfg(target_os = "windows")]
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_millis(1500));
         use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
@@ -462,83 +462,22 @@ fn exit_now() -> ! {
     std::process::exit(0)
 }
 
-/// Affiche une erreur bloquante (boîte de dialogue sous Windows) puis quitte.
-fn fatal(msg: &str) -> ! {
+/// Affiche une erreur bloquante (boîte de dialogue) puis quitte.
+pub(crate) fn fatal(msg: &str) -> ! {
     eprintln!("{msg}");
-    #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
-        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-        let (text, title) = (w(msg), w("Ferrox"));
-        // SAFETY: chaînes UTF-16 terminées par 0, valides pendant l'appel.
-        unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR) };
-    }
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+    let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (text, title) = (w(msg), w("Ferrox"));
+    // SAFETY: chaînes UTF-16 terminées par 0, valides pendant l'appel.
+    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR) };
     std::process::exit(1)
-}
-
-#[cfg(target_os = "linux")]
-fn which(bin: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).any(|d| d.join(bin).is_file()))
-        .unwrap_or(false)
-}
-
-fn build(
-    builder: WebViewBuilder<'_>,
-    window: &Window,
-    #[cfg(target_os = "linux")] fixed: &gtk::Fixed,
-) -> wry::Result<WebView> {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = window;
-        use wry::WebViewBuilderExtUnix;
-        builder.build_gtk(fixed)
-    }
-    #[cfg(target_os = "windows")]
-    {
-        use wry::WebViewBuilderExtWindows;
-        // Toutes les vues partagent le même dossier de profil : WebView2 exige des
-        // arguments identiques. On garde SmartScreen (anti-phishing) actif, que wry
-        // désactive par défaut, et on coupe la télémétrie / les pings.
-        builder
-            .with_additional_browser_args(BROWSER_ARGS.get().map(String::as_str).unwrap_or(WEBVIEW2_ARGS))
-            .with_browser_extensions_enabled(true)
-            .build_as_child(window)
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    {
-        builder.build_as_child(window)
-    }
-}
-
-static BROWSER_ARGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-
-/// Arguments du moteur WebView2 selon les réglages (lecture auto, GPU).
-fn browser_args(s: &Settings) -> String {
-    // Les onglets d'un même site partagent un processus : moins de RAM.
-    let mut a = format!("{WEBVIEW2_ARGS} --process-per-site");
-    if s.eco_mode {
-        a.push_str(" --renderer-process-limit=4 --enable-low-end-device-mode");
-    }
-    if s.allow_autoplay {
-        a.push_str(" --autoplay-policy=no-user-gesture-required");
-    }
-    if !s.hardware_accel {
-        a.push_str(" --disable-gpu --disable-gpu-compositing");
-    }
-    a
 }
 
 fn download_dir_of(s: &Settings) -> Option<std::path::PathBuf> {
     if s.download_dir.is_empty() { dirs::download_dir() } else { Some(s.download_dir.clone().into()) }
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-const WEBVIEW2_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeShoppingAssistant,\
-AutofillServerCommunication,msEdgeCollections --no-pings --disable-domain-reliability";
-
-/// Icône de fenêtre : le renard Ferrox (64×64 RGBA, généré depuis assets/logo/fox.svg).
-#[cfg(target_os = "windows")]
+/// Icône de la barre des tâches : le renard Ferrox (128×128 RGBA, généré depuis assets/logo/fox.svg).
 fn taskbar_icon() -> Option<tao::window::Icon> {
     const RGBA: &[u8] = include_bytes!("../assets/logo/icon128.rgba");
     tao::window::Icon::from_rgba(RGBA.to_vec(), 128, 128).ok()
@@ -554,12 +493,16 @@ fn logical_size(window: &Window) -> (u32, u32) {
     (s.width, s.height)
 }
 
-fn full_rect(window: &Window) -> Rect {
-    let (w, h) = logical_size(window);
-    Rect {
-        position: LogicalPosition::new(0, 0).into(),
-        size: WLogicalSize::new(w, h).into(),
-    }
+/// Rectangle logique → pixels physiques (les fenêtres des vues sont en pixels physiques).
+fn to_bounds(window: &Window, x: u32, y: u32, w: u32, h: u32) -> Bounds {
+    let s = window.scale_factor();
+    let p = |v: u32| (v as f64 * s).round() as i32;
+    Bounds { x: p(x), y: p(y), w: p(w).max(1), h: p(h).max(1) }
+}
+
+fn full_bounds(window: &Window) -> Bounds {
+    let s = window.inner_size();
+    Bounds { x: 0, y: 0, w: s.width.max(1) as i32, h: s.height.max(1) as i32 }
 }
 
 fn percent_encode(s: &str) -> String {
@@ -589,31 +532,25 @@ fn secret() -> String {
     out
 }
 
-/// Script injecté au début de chaque document d'un onglet.
-/// Il capture la fonction native d'envoi AVANT que le site ne s'exécute : le site ne peut
-/// ni l'intercepter ni connaître la clé, donc ne peut pas se faire passer pour Ferrox.
+/// Script injecté au début de chaque document d'un onglet, avant tout script du site.
+/// C'est une fonction qui reçoit la fonction native d'envoi : elle n'est jamais visible dans
+/// `window`, le site ne peut ni l'intercepter ni connaître la clé de l'onglet.
+const EXT_UNSUPPORTED: &str = "Les extensions du Chrome Web Store ne sont pas disponibles avec le moteur Chromium embarqué (CEF). Le bloqueur de pubs et de pisteurs de Ferrox reste actif.";
+
 const MENU_SCRIPT: &str = include_str!("../ui/menu.js");
 
 fn content_init(token: &str, blocker: Option<&str>, dnt: bool, accent: &str) -> String {
     format!(
-        r#"(() => {{
+        r#"(function (__native) {{
   'use strict';
   const __T = '{token}';
   const __apply = Reflect.apply;
-  const __post = (() => {{
-    try {{
-      const w = window.chrome && window.chrome.webview;
-      if (w && w.postMessage) {{ const f = w.postMessage; return (m) => __apply(f, w, [m]); }}
-      const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc;
-      if (h && h.postMessage) {{ const f = h.postMessage; return (m) => __apply(f, h, [m]); }}
-    }} catch (_) {{}}
-    return null;
-  }})();
+  const __post = (m) => __apply(__native, null, [m]);
   const __fxSend = (m) => {{ try {{ if (__post) __post(__T + '|' + m); }} catch (_) {{}} }};
   {blocker}
   {privacy}
   {menu}
-}})();"#,
+}})"#,
         blocker = blocker.unwrap_or(""),
         // couleur déjà validée (#rrggbb) par les paramètres
         menu = MENU_SCRIPT.replace("__ACCENT__", accent),
@@ -642,30 +579,22 @@ fn is_local_host(host: &str) -> bool {
 
 impl App {
     // ------------------------------------------------------------------ layout
-    fn content_rect(&self) -> Rect {
+    fn content_rect(&self) -> Bounds {
         let (w, h) = logical_size(&self.window);
         if self.fullscreen {
-            return Rect { position: LogicalPosition::new(0, 0).into(), size: WLogicalSize::new(w, h).into() };
+            return full_bounds(&self.window);
         }
         let b = if self.window.is_maximized() { 0 } else { BORDER };
         let panel = if self.panel.is_some() { PANEL_W } else { 0 };
-        Rect {
-            position: LogicalPosition::new(b, TOP_H).into(),
-            size: WLogicalSize::new(
-                w.saturating_sub(2 * b + panel).max(1),
-                h.saturating_sub(TOP_H + b).max(1),
-            )
-            .into(),
-        }
+        to_bounds(&self.window, b, TOP_H, w.saturating_sub(2 * b + panel), h.saturating_sub(TOP_H + b))
     }
 
     fn layout(&mut self) {
-        self.close_popup();
-        let _ = self.ui.set_bounds(full_rect(&self.window));
+        self.ui.set_bounds(full_bounds(&self.window));
         let r = self.content_rect();
         for t in &self.tabs {
             if let Some(wv) = &t.wv {
-                let _ = wv.set_bounds(r);
+                wv.set_bounds(r);
             }
         }
     }
@@ -769,8 +698,7 @@ impl App {
             zoom: self.settings.default_zoom,
             can_back: false,
             can_fwd: false,
-            frame_id: None,
-            suspended: false,
+            pid: None,
             blocked_net: 0,
         });
         id
@@ -786,52 +714,37 @@ impl App {
         }
         let sh = self.shared.clone();
         let p = self.proxy.clone();
-        let rect = self.content_rect();
-        let home = (url == HOME_URL).then(|| self.home_html());
+        let is_home = url == HOME_URL;
+        let load = if is_home { data_url(&self.home_html()) } else { url.clone() };
         let adblock = self.settings.adblock;
-        let zoom = self.tabs[idx].zoom;
-
-        let mut builder = if private {
-            // Même environnement (exigé par WebView2), mais session InPrivate éphémère.
-            WebViewBuilder::new_with_web_context(&mut self.ctx).with_incognito(true)
-        } else {
-            WebViewBuilder::new_with_web_context(&mut self.ctx)
-        };
+        self.tabs[idx].pid = None;
 
         // Canal privé page → Ferrox : clé secrète propre à l'onglet, gardée dans une
         // fermeture JavaScript que les scripts du site ne peuvent pas lire.
         let token = secret();
-        builder = builder.with_initialization_script(content_init(
-            &token,
-            adblock.then(|| sh.script.as_str()),
-            self.settings.send_dnt,
-            &self.settings.accent,
-        ));
+        let init = content_init(&token, adblock.then(|| sh.script.as_str()), self.settings.send_dnt, &self.settings.accent);
 
-        let nav = {
+        let allow_nav = {
             let (sh, p) = (sh.clone(), p.clone());
-            move |url: String| -> bool {
+            move |url: &str| -> bool {
                 let lower = url.to_ascii_lowercase();
                 if lower.starts_with("about:") || lower.starts_with("blob:") || lower.starts_with("data:") {
-                    return true;
-                }
-                // Pages des extensions (popup, options) : Windows uniquement.
-                if extensions::SUPPORTED && lower.starts_with("chrome-extension://") {
+                    // (les sites ne peuvent pas ouvrir de document data: en haut de page : Chromium l'interdit)
                     return true;
                 }
                 if !(lower.starts_with("https://") || lower.starts_with("http://")) {
-                    // file://, javascript:, schémas d'applications… refusés.
+                    // file://, javascript:, chrome://, schémas d'applications… refusés.
                     return false;
                 }
-                if sh.adblock.load(Ordering::Relaxed) && sh.blocker.is_blocked_url(&url) {
-                    let _ = p.send_event(UserEvent::NavBlocked(id, url));
+                if sh.adblock.load(Ordering::Relaxed) && sh.blocker.is_blocked_url(url) {
+                    let _ = p.send_event(UserEvent::NavBlocked(id, url.to_string()));
                     return false;
                 }
                 if lower.starts_with("http://") && sh.https_only.load(Ordering::Relaxed) {
-                    let host = blocker::host_of(&url).unwrap_or("").to_ascii_lowercase();
+                    let host = blocker::host_of(url).unwrap_or("").to_ascii_lowercase();
                     let allowed = sh.http_allowed.lock().map(|s| s.contains(&host)).unwrap_or(false);
                     if !is_local_host(&host) && !allowed {
-                        let _ = p.send_event(UserEvent::HttpBlocked(id, url));
+                        let _ = p.send_event(UserEvent::HttpBlocked(id, url.to_string()));
                         return false;
                     }
                 }
@@ -839,167 +752,109 @@ impl App {
             }
         };
 
-        let perms = sh.block_perms.clone();
-        builder = builder
-            .with_bounds(rect)
-            .with_background_color((18, 16, 25, 255))
-            .with_devtools(cfg!(debug_assertions))
-            .with_autoplay(self.settings.allow_autoplay)
-            .with_general_autofill_enabled(self.settings.autofill)
-            .with_clipboard(true)
-            .with_background_throttling(BackgroundThrottlingPolicy::Suspend)
-            .with_navigation_handler(nav)
-            .with_permission_handler(move |kind| {
-                if !perms.load(Ordering::Relaxed) {
-                    return PermissionResponse::Default;
+        // Blocage au niveau réseau (scripts, images, iframes… de domaines de pistage / publicité).
+        let block_request: Option<engine::Filter> = adblock.then(|| {
+            let (sh, p) = (sh.clone(), p.clone());
+            Arc::new(move |url: &str| -> bool {
+                if !sh.adblock.load(Ordering::Relaxed) || !url.starts_with("http") {
+                    return false;
                 }
-                let _: PermissionKind = kind;
-                PermissionResponse::Deny
-            })
-            .with_new_window_req_handler({
-                let (sh, p) = (sh.clone(), p.clone());
-                move |url, _| {
-                    let lower = url.to_ascii_lowercase();
-                    let ok = (lower.starts_with("https://") || lower.starts_with("http://")
-                        || (extensions::SUPPORTED && lower.starts_with("chrome-extension://")))
-                        && !(sh.adblock.load(Ordering::Relaxed) && sh.blocker.is_blocked_url(&url));
-                    if ok {
-                        let _ = p.send_event(UserEvent::OpenTab(url));
-                    }
-                    NewWindowResponse::Deny
+                let blocked = sh.blocker.is_blocked_url(url);
+                if blocked {
+                    let _ = p.send_event(UserEvent::NetBlocked(id));
                 }
-            })
-            .with_document_title_changed_handler({
-                let p = p.clone();
-                move |t| {
-                    let _ = p.send_event(UserEvent::Title(id, t.chars().take(300).collect()));
-                }
-            })
-            .with_on_page_load_handler({
-                let p = p.clone();
-                move |ev, url| {
-                    let _ = p.send_event(UserEvent::Load(id, matches!(ev, PageLoadEvent::Started), url));
-                }
-            })
-            // Canal minimal depuis les pages web : seulement des compteurs / raccourcis.
-            .with_ipc_handler({
-                let p = p.clone();
-                move |req| {
-                    // Message sans la clé de l'onglet → ignoré (forgé par un site).
-                    let Some(b) = req.body().strip_prefix(token.as_str()).and_then(|r| r.strip_prefix('|')) else { return };
-                    if let Some(json) = b.strip_prefix("h:") {
-                        // Raccourcis de la page d'accueil : accepté uniquement depuis la page d'accueil
-                        // (document about:blank chargé par Ferrox), jamais depuis un site.
-                        let uri = req.uri().to_string();
-                        if b.len() <= 16 * 1024 && (uri.starts_with("about:blank") || uri.is_empty()) {
-                            if let Ok(tiles) = serde_json::from_str::<Vec<config::Tile>>(json) {
-                                let _ = p.send_event(UserEvent::HomeTiles(id, tiles));
-                            }
-                        }
-                        return;
-                    }
-                    if b.len() > 1024 {
-                        return;
-                    }
-                    if let Some(n) = b.strip_prefix("b:").and_then(|n| n.parse::<u32>().ok()) {
-                        let _ = p.send_event(UserEvent::Blocked(id, n.min(100_000)));
-                    } else if let Some(k) = b.strip_prefix("k:") {
-                        if is_shortcut(k) {
-                            let _ = p.send_event(UserEvent::Key(id, k.to_string()));
-                        }
-                    } else if let Some(u) = b.strip_prefix("f:") {
-                        // Icône du site : HTTPS uniquement, caractères sûrs uniquement.
-                        if u.starts_with("https://") && !u.contains(['"', '\\', '<', '>', ' ', '\n']) {
-                            let _ = p.send_event(UserEvent::Favicon(id, u.to_string()));
-                        }
-                    } else if b == "x" {
-                        let _ = p.send_event(UserEvent::ClosePopup);
-                    } else if let Some(u) = b.strip_prefix("op:") {
-                        // menu clic droit : « ouvrir dans un onglet privé »
-                        if (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= 4096 {
-                            let _ = p.send_event(UserEvent::OpenTabWith(u.to_string(), true));
-                        }
-                    } else if let Some(u) = b.strip_prefix("o:") {
-                        if (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= 4096 {
-                            let _ = p.send_event(UserEvent::OpenTab(u.to_string()));
-                        }
-                    } else if let Some(q) = b.strip_prefix("s:") {
-                        let q: String = q.chars().filter(|c| !c.is_control()).take(400).collect();
-                        if !q.trim().is_empty() {
-                            let _ = p.send_event(UserEvent::SearchTab(q));
-                        }
-                    }
-                }
-            })
-            .with_download_started_handler({
-                let p = p.clone();
-                let dl_dir = sh.download_dir.clone();
-                move |url, path| {
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().replace(['/', '\\'], "_"))
-                        .filter(|n| !n.is_empty() && n != "." && n != "..")
-                        .unwrap_or_else(|| "telechargement".into());
-                    if let Some(dir) = dl_dir.lock().ok().and_then(|d| d.clone()) {
-                        *path = dir.join(name);
-                    }
-                    let _ = p.send_event(UserEvent::Download(url, false));
-                    true
-                }
-            })
-            .with_download_completed_handler({
-                let p = p.clone();
-                move |url, _, ok| {
-                    let _ = p.send_event(UserEvent::Download(url, ok));
-                }
-            });
+                blocked
+            }) as engine::Filter
+        });
 
-        if let Some(html) = home {
-            builder = builder.with_html(html);
-        }
-
-        let Ok(wv) = build(builder, &self.window, #[cfg(target_os = "linux")] &self.fixed) else {
-            return;
+        let on_popup = {
+            let (sh, p) = (sh.clone(), p.clone());
+            move |url: String| {
+                let lower = url.to_ascii_lowercase();
+                let ok = (lower.starts_with("https://") || lower.starts_with("http://"))
+                    && url.len() <= 8192
+                    && !(sh.adblock.load(Ordering::Relaxed) && sh.blocker.is_blocked_url(&url));
+                if ok {
+                    let _ = p.send_event(UserEvent::OpenTab(url));
+                }
+            }
         };
 
-        #[cfg(target_os = "linux")]
-        harden_linux(&wv, &self.settings, { let p = p.clone(); move |on| { let _ = p.send_event(UserEvent::Fullscreen(id, on)); } });
-        #[cfg(target_os = "windows")]
-        {
-            extensions::wv2::on_fullscreen(&wv, { let p = p.clone(); move |on| { let _ = p.send_event(UserEvent::Fullscreen(id, on)); } });
-            extensions::wv2::on_favicon(&wv, { let p = p.clone(); move |u| {
-                if u.starts_with("https://") && u.len() < 1000 && !u.contains(['"', '<', '>', ' ']) {
-                    let _ = p.send_event(UserEvent::Favicon(id, u));
+        // Canal minimal depuis les pages web : seulement des compteurs / raccourcis.
+        let on_message = {
+            let p = p.clone();
+            move |body: &str, uri: &str| {
+                // Message sans la clé de l'onglet → ignoré (forgé par un site).
+                let Some(b) = body.strip_prefix(token.as_str()).and_then(|r| r.strip_prefix('|')) else { return };
+                if let Some(json) = b.strip_prefix("h:") {
+                    // Raccourcis de la page d'accueil : accepté uniquement depuis la page d'accueil
+                    // (document chargé par Ferrox), jamais depuis un site.
+                    if is_home && b.len() <= 16 * 1024 && uri.starts_with("data:text/html") {
+                        if let Ok(tiles) = serde_json::from_str::<Vec<config::Tile>>(json) {
+                            let _ = p.send_event(UserEvent::HomeTiles(id, tiles));
+                        }
+                    }
+                    return;
                 }
-            } });
-            self.tabs[idx].frame_id = extensions::wv2::main_frame_id(&wv);
-            if !private {
-                let p = p.clone();
-                extensions::wv2::on_favicon_image(&wv, move |png| {
-                    let _ = p.send_event(UserEvent::EngineIcon(id, png));
-                });
+                if b.len() > 4096 + 8 {
+                    return;
+                }
+                if let Some(n) = b.strip_prefix("b:").and_then(|n| n.parse::<u32>().ok()) {
+                    let _ = p.send_event(UserEvent::Blocked(id, n.min(100_000)));
+                } else if let Some(k) = b.strip_prefix("k:") {
+                    if is_shortcut(k) {
+                        let _ = p.send_event(UserEvent::Key(id, k.to_string()));
+                    }
+                } else if let Some(u) = b.strip_prefix("f:") {
+                    // Icône du site : HTTPS uniquement, caractères sûrs uniquement.
+                    if u.starts_with("https://") && u.len() < 1000 && !u.contains(['"', '\\', '<', '>', ' ', '\n']) {
+                        let _ = p.send_event(UserEvent::Favicon(id, u.to_string()));
+                    }
+                } else if let Some(u) = b.strip_prefix("op:") {
+                    // menu clic droit : « ouvrir dans un onglet privé »
+                    if u.starts_with("https://") || u.starts_with("http://") {
+                        let _ = p.send_event(UserEvent::OpenTabWith(u.to_string(), true));
+                    }
+                } else if let Some(u) = b.strip_prefix("o:") {
+                    if u.starts_with("https://") || u.starts_with("http://") {
+                        let _ = p.send_event(UserEvent::OpenTab(u.to_string()));
+                    }
+                } else if let Some(q) = b.strip_prefix("s:") {
+                    let q: String = q.chars().filter(|c| !c.is_control()).take(400).collect();
+                    if !q.trim().is_empty() {
+                        let _ = p.send_event(UserEvent::SearchTab(q));
+                    }
+                }
             }
-            if adblock {
-                let p = p.clone();
-                extensions::wv2::network_block(&wv, &self.net_domains, move || {
-                    let _ = p.send_event(UserEvent::NetBlocked(id));
-                });
-            }
-        }
-        if zoom != 100 {
-            let _ = wv.zoom(zoom as f64 / 100.0);
-        }
+        };
 
-        if url != HOME_URL {
-            let _ = wv.load_url(&url);
-        }
+        let hooks = Hooks {
+            on_message: Arc::new(on_message),
+            allow_nav: Arc::new(allow_nav),
+            block_request,
+            on_popup: Arc::new(on_popup),
+            download_dir: sh.download_dir.clone(),
+            block_perms: sh.block_perms.clone(),
+        };
+        let wv = View::new(
+            ViewOptions {
+                id,
+                url: load,
+                init,
+                private,
+                bounds: self.content_rect(),
+                visible: self.active == Some(id),
+                zoom: self.tabs[idx].zoom,
+                ui: false,
+            },
+            hooks,
+        );
         self.tabs[idx].wv = Some(wv);
     }
 
     fn switch(&mut self, id: u64) {
         let Some(idx) = self.idx(id) else { return };
         if self.active != Some(id) {
-            self.close_popup();
             self.set_fullscreen(false);
             self.session_dirty = true;
         }
@@ -1010,23 +865,19 @@ impl App {
         }
         if internal_page(&self.tabs[idx].url).is_some() {
             // Page interne : c'est l'interface qui affiche la page et reçoit le clavier.
-            let _ = self.ui.focus();
+            self.ui.focus();
         }
         let r = self.content_rect();
         for t in &mut self.tabs {
             if let Some(wv) = &t.wv {
                 if t.id == id {
-                    let _ = wv.set_bounds(r);
-                    let _ = wv.set_visible(true);
-                    let _ = wv.focus();
+                    wv.set_bounds(r);
+                    wv.set_visible(true);
+                    wv.focus();
                     t.last_active = Instant::now();
-                    t.suspended = false;
-                    #[cfg(target_os = "windows")]
-                    extensions::wv2::set_background(wv, false);
                 } else {
-                    let _ = wv.set_visible(false);
-                    #[cfg(target_os = "windows")]
-                    extensions::wv2::set_background(wv, true);
+                    // Vue cachée : Chromium réduit son activité (rendu, minuteries).
+                    wv.set_visible(false);
                 }
             }
         }
@@ -1039,6 +890,7 @@ impl App {
         if self.tabs.len() == 1 && self.settings.quit_on_last_tab {
             // Dernier onglet fermé → on quitte (la session garde cet onglet).
             self.quit();
+            return;
         }
         let tab = self.tabs.remove(idx);
         self.session_dirty = true;
@@ -1048,7 +900,7 @@ impl App {
                 self.closed.remove(0);
             }
         }
-        drop(tab.wv); // détruit la WebView et libère la mémoire
+        drop(tab.wv); // ferme le navigateur et libère la mémoire
         if self.tabs.is_empty() {
             self.new_tab(HOME_URL.into(), false);
             return;
@@ -1067,13 +919,14 @@ impl App {
             return; // un onglet privé mis en veille perdrait sa session
         }
         if let Some(wv) = self.tabs[idx].wv.take() {
-            if let Ok(u) = wv.url() {
+            if let Some(u) = wv.url() {
                 if u.starts_with("http") {
                     self.tabs[idx].url = u;
                 }
             }
             drop(wv);
             self.tabs[idx].loading = false;
+            self.tabs[idx].pid = None;
         }
     }
 
@@ -1114,7 +967,7 @@ impl App {
         self.active.and_then(|id| self.idx(id))
     }
 
-    fn active_wv(&self) -> Option<&WebView> {
+    fn active_wv(&self) -> Option<&View> {
         self.active_idx().and_then(|i| self.tabs[i].wv.as_ref())
     }
 
@@ -1133,9 +986,7 @@ impl App {
         }
         self.tabs[i].url = url.clone();
         match &self.tabs[i].wv {
-            Some(wv) => {
-                let _ = wv.load_url(&url);
-            }
+            Some(wv) => wv.load_url(&url),
             None => {
                 let id = self.tabs[i].id;
                 self.switch(id);
@@ -1156,41 +1007,46 @@ impl App {
                     if !t.trim().is_empty() {
                         self.tabs[i].title = t.clone();
                     }
-                    // Sites « à page unique » (YouTube…) : l'adresse change sans rechargement.
-                    let cur = self.tabs[i].wv.as_ref().and_then(|w| w.url().ok());
-                    if let Some(cur) = cur.filter(|u| u.starts_with("http")) {
-                        if cur != self.tabs[i].url {
-                            self.tabs[i].url = cur.clone();
-                            self.session_dirty = true;
-                            let nav = self.tabs[i].wv.as_ref().map(|w| (w.can_go_back().unwrap_or(false), w.can_go_forward().unwrap_or(false)));
-                            if let Some((b, f)) = nav {
-                                self.tabs[i].can_back = b;
-                                self.tabs[i].can_fwd = f;
-                            }
-                        }
-                        if !self.tabs[i].private && self.settings.history_enabled {
-                            self.history.visit(&cur, &t);
-                        }
+                    let cur = self.tabs[i].url.clone();
+                    if cur.starts_with("http") && !self.tabs[i].private && self.settings.history_enabled {
+                        self.history.visit(&cur, &t);
                     }
                     self.push_state();
                 }
             }
-            UserEvent::Renderers(r) => self.renderers = r,
+            UserEvent::Address(id, url) => {
+                // Sites « à page unique » (YouTube…) : l'adresse change sans rechargement.
+                if let Some(i) = self.idx(id) {
+                    if url.starts_with("http") && url != self.tabs[i].url {
+                        self.tabs[i].url = url;
+                        self.session_dirty = true;
+                        self.push_state();
+                    }
+                }
+            }
+            UserEvent::Created(id) => {
+                // La fenêtre du navigateur existe : on la (re)place et on (re)donne le focus.
+                if self.active == Some(id) {
+                    if let Some(wv) = self.active_wv() {
+                        wv.focus();
+                    }
+                }
+            }
+            UserEvent::TabPid(id, pid) => {
+                if let Some(i) = self.idx(id) {
+                    self.tabs[i].pid = Some(pid);
+                }
+            }
+            UserEvent::BrowserClosed => {
+                if self.exiting.is_some() && engine::live_browsers() == 0 {
+                    self.finish_exit();
+                }
+            }
             UserEvent::HomeTiles(id, tiles) => {
                 if self.idx(id).is_some_and(|i| self.tabs[i].url == HOME_URL) {
                     self.settings.home_tiles = config::sanitize_tiles(tiles);
                     self.settings.save();
                     self.refresh_icons();
-                }
-            }
-            UserEvent::EngineIcon(id, png) => {
-                // Icône vue par le moteur pendant la visite : on la garde si on n'en a pas de
-                // meilleure (une icône trouvée dans la page est souvent en plus haute définition).
-                if let Some(i) = self.idx(id) {
-                    let host = icons::host_key(&self.tabs[i].url);
-                    if !host.is_empty() && self.settings.site_icons && !self.icon_map.contains_key(&host) {
-                        let _ = self.proxy.send_event(UserEvent::Icon(host, Some(icons::png_data_url(&png))));
-                    }
                 }
             }
             UserEvent::Icon(host, data) => {
@@ -1202,33 +1058,32 @@ impl App {
                     // pages d'accueil ouvertes + interface
                     for t in self.tabs.iter().filter(|t| t.url == HOME_URL) {
                         if let Some(wv) = &t.wv {
-                            let _ = wv.evaluate_script(&call);
+                            wv.eval(&call);
                         }
                     }
                     self.icon_map.insert(host, d);
                     self.send_icons();
                 }
             }
-            UserEvent::Load(id, started, url) => {
+            UserEvent::Load(id, started, url, back, fwd) => {
                 if let Some(i) = self.idx(id) {
                     let t = &mut self.tabs[i];
+                    let was = t.loading;
                     t.loading = started;
-                    if started {
+                    t.can_back = back;
+                    t.can_fwd = fwd;
+                    if started && !was {
                         t.blocked = 0;
                         t.blocked_net = 0;
                         if blocker::host_of(&url) != blocker::host_of(&t.url) {
                             t.favicon = None;
                         }
                     }
-                    if url.starts_with("http") || url.starts_with("chrome-extension://") {
+                    if url.starts_with("http") {
                         t.url = url;
                         self.session_dirty = true;
                     }
-                    if let Some(wv) = &t.wv {
-                        t.can_back = wv.can_go_back().unwrap_or(false);
-                        t.can_fwd = wv.can_go_forward().unwrap_or(false);
-                    }
-                    if !started && !t.private && self.settings.history_enabled && t.url.starts_with("http") {
+                    if !started && was && !t.private && self.settings.history_enabled && t.url.starts_with("http") {
                         let (u, title) = (t.url.clone(), t.title.clone());
                         let title = if title.starts_with("http") { String::new() } else { title };
                         self.history.visit(&u, &title);
@@ -1263,62 +1118,6 @@ impl App {
                     self.push_state();
                 }
             }
-            UserEvent::ExtDownloaded(res) => match res {
-                Ok(path) => self.ext_add(path),
-                Err(e) => self.ext_set_status(false, e),
-            },
-            UserEvent::ExtAdded(res) => {
-                match res {
-                    Ok(name) => self.ext_set_status(false, format!("« {name} » installée ✔")),
-                    Err(e) => self.ext_set_status(false, e),
-                }
-                self.ext_refresh();
-            }
-            UserEvent::ExtList(list) => {
-                self.exts = list
-                    .into_iter()
-                    .map(|(id, name, enabled)| {
-                        let mut info = extensions::info_from_disk(&id).unwrap_or_default();
-                        info.id = id;
-                        if info.name.is_empty() || info.name.starts_with("__MSG_") {
-                            info.name = name;
-                        }
-                        info.enabled = enabled;
-                        info
-                    })
-                    .collect();
-                self.exts.sort_by_key(|e| e.name.to_lowercase());
-                if !self.settings.ext_cleanup_done {
-                    // Une seule fois : ne garde que uBlock Origin Lite (demandé par l'utilisateur).
-                    self.settings.ext_cleanup_done = true;
-                    self.settings.save();
-                    let others: Vec<String> = self.exts.iter().filter(|e| e.id != extensions::UBOL_ID).map(|e| e.id.clone()).collect();
-                    for id in others {
-                        self.ext_remove(id);
-                    }
-                }
-                if !self.ubo_checked {
-                    self.ubo_checked = true;
-                    if !self.settings.ubo_offered {
-                        // 1er lancement : installe uBlock Origin Lite (une seule fois, même si on la supprime ensuite).
-                        self.settings.ubo_offered = true;
-                        self.settings.save();
-                        if !self.exts.iter().any(|e| e.id == extensions::UBOL_ID) {
-                            self.ext_install(extensions::UBOL_ID);
-                        }
-                    }
-                }
-                self.push_state();
-            }
-            UserEvent::ExtChanged(removed, ok) => {
-                if let Some(id) = removed.filter(|id| ok && valid_ext_id(id)) {
-                    let _ = std::fs::remove_dir_all(extensions::ext_dir().join(&id));
-                    self.ext_set_status(false, "Extension supprimée".into());
-                } else if !ok {
-                    self.ext_set_status(false, "L'opération a échoué".into());
-                }
-                self.ext_refresh();
-            }
             UserEvent::Download(url, done) => {
                 let kind = if done { "download_done" } else { "download" };
                 self.notice = Some(serde_json::json!({"kind": kind, "url": url}));
@@ -1342,7 +1141,6 @@ impl App {
                     self.set_fullscreen(on);
                 }
             }
-            UserEvent::ClosePopup => self.close_popup(),
             UserEvent::OpenTabWith(url, private) => self.new_tab(url, private),
             UserEvent::SearchTab(q) => {
                 let url = self.settings.search_url.replace("{}", &percent_encode(q.trim()));
@@ -1380,22 +1178,22 @@ impl App {
             }
             "r" => {
                 if let Some(wv) = self.active_wv() {
-                    let _ = wv.reload();
+                    wv.reload();
                 }
             }
             "back" => {
                 if let Some(wv) = self.active_wv() {
-                    let _ = wv.go_back();
+                    wv.go_back();
                 }
             }
             "fwd" => {
                 if let Some(wv) = self.active_wv() {
-                    let _ = wv.go_forward();
+                    wv.go_forward();
                 }
             }
             "l" => {
-                let _ = self.ui.focus();
-                let _ = self.ui.evaluate_script("window.fx && fx.focusUrl()");
+                self.ui.focus();
+                self.ui.eval("window.fx && fx.focusUrl()");
             }
             "next" | "prev" => self.cycle(k == "next"),
             "zin" => self.zoom(10),
@@ -1417,7 +1215,6 @@ impl App {
                 if self.fullscreen {
                     self.set_fullscreen(false);
                 }
-                self.close_popup();
             }
             d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() && d != "0" => {
                 // Ctrl+1…8 : onglet n ; Ctrl+9 : dernier onglet.
@@ -1437,7 +1234,7 @@ impl App {
         let z = if delta == 0 { 100 } else { (self.tabs[i].zoom as i32 + delta).clamp(30, 300) as u32 };
         self.tabs[i].zoom = z;
         if let Some(wv) = &self.tabs[i].wv {
-            let _ = wv.zoom(z as f64 / 100.0);
+            wv.zoom(z);
         }
         self.push_state();
     }
@@ -1452,55 +1249,8 @@ impl App {
         self.push_state();
     }
 
-    fn close_popup(&mut self) {
-        if self.popup.take().is_some() {
-            self.push_state();
-        }
-    }
-
-    /// Ouvre la fenêtre (popup) d'une extension sous le bouton Extensions.
-    fn open_ext_popup(&mut self, url: String) {
-        self.close_popup();
-        let (w, _) = logical_size(&self.window);
-        let pw = 380u32;
-        let right = if self.panel.is_some() { PANEL_W } else { 0 } + BORDER + 8;
-        let rect = Rect {
-            position: LogicalPosition::new(w.saturating_sub(pw + right), TOP_H + 6).into(),
-            size: WLogicalSize::new(pw, 560).into(),
-        };
-        let p = self.proxy.clone();
-        let p2 = self.proxy.clone();
-        let builder = WebViewBuilder::new_with_web_context(&mut self.ctx)
-            .with_bounds(rect)
-            .with_background_color((24, 24, 27, 255))
-            .with_devtools(cfg!(debug_assertions))
-            .with_url(url)
-            // Les liens ouverts depuis la popup vont dans un nouvel onglet.
-            .with_navigation_handler(move |u| {
-                if u.starts_with("chrome-extension://") || u.starts_with("about:") {
-                    return true;
-                }
-                if u.starts_with("https://") || u.starts_with("http://") {
-                    let _ = p.send_event(UserEvent::OpenTab(u));
-                    let _ = p.send_event(UserEvent::ClosePopup);
-                }
-                false
-            })
-            .with_new_window_req_handler(move |u, _| {
-                if u.starts_with("https://") || u.starts_with("http://") || u.starts_with("chrome-extension://") {
-                    let _ = p2.send_event(UserEvent::OpenTab(u));
-                }
-                NewWindowResponse::Deny
-            });
-        if let Ok(wv) = build(builder, &self.window, #[cfg(target_os = "linux")] &self.fixed) {
-            let _ = wv.focus();
-            self.popup = Some(wv);
-        }
-        self.push_state();
-    }
-
     fn ui_eval(&self, js: &str) {
-        let _ = self.ui.evaluate_script(&format!("window.fx && {js}"));
+        self.ui.eval(&format!("window.fx && {js}"));
     }
 
     fn send_history(&self, q: &str, offset: usize) {
@@ -1516,20 +1266,44 @@ impl App {
         self.session_dirty = false;
     }
 
-    fn quit(&mut self) -> ! {
+    /// Ferme Ferrox : enregistre, cache la fenêtre, ferme les navigateurs du moteur puis arrête
+    /// le moteur (voir [`App::finish_exit`]).
+    fn quit(&mut self) {
+        self.begin_exit(Exit::Quit);
+    }
+
+    fn begin_exit(&mut self, how: Exit) {
+        if self.exiting.is_some() {
+            return;
+        }
         self.settings.save();
         self.save_session();
         // La fenêtre disparaît tout de suite, même si le moteur met du temps à s'arrêter.
         self.window.set_visible(false);
         if self.settings.clear_on_exit {
-            let _ = self.ui.clear_all_browsing_data();
-            // laisse un court délai au moteur pour effacer (sinon : refait au prochain démarrage)
-            std::thread::sleep(Duration::from_millis(400));
+            // Le profil est aussi supprimé au prochain démarrage, avant le lancement du moteur.
+            engine::clear_browsing_data();
         }
-        // Libère proprement les vues web avant de sortir.
-        self.popup = None;
+        self.exiting = Some((how, Instant::now()));
         for t in &mut self.tabs {
             t.wv = None;
+        }
+        // La vue de l'interface est fermée en dernier.
+        let ui = std::mem::replace(&mut self.ui, View::closed());
+        drop(ui);
+        if engine::live_browsers() == 0 {
+            self.finish_exit();
+        }
+    }
+
+    /// Tous les navigateurs sont fermés (ou le délai est écoulé) : arrêt du moteur et sortie.
+    fn finish_exit(&mut self) -> ! {
+        let how = self.exiting.map(|(h, _)| h).unwrap_or(Exit::Quit);
+        engine::stop();
+        if how == Exit::Restart {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(exe).spawn();
+            }
         }
         exit_now()
     }
@@ -1546,11 +1320,10 @@ impl App {
         match cmd {
             UiCmd::Ready => {
                 // (re)donne la clé à l'interface ; elle ne l'accepte qu'une fois
-                let _ = self.ui.evaluate_script(&format!("window.fx && fx.setToken('{}')", self.ui_token));
+                self.ui.eval(&format!("window.fx && fx.setToken('{}')", self.ui_token));
                 self.last_state.borrow_mut().clear();
                 self.push_state();
                 self.send_icons();
-                self.ext_refresh();
             }
             UiCmd::Navigate { input } => {
                 let url = self.resolve_input(&input);
@@ -1575,7 +1348,7 @@ impl App {
                 }
             }
             UiCmd::Zoom { delta } => self.zoom(delta.clamp(-50, 50)),
-            UiCmd::ClosePopup => self.close_popup(),
+            UiCmd::ClosePopup => {}
             UiCmd::OpenUrl { url } => {
                 if url.starts_with("https://") || url.starts_with("http://") {
                     self.new_tab(url, false);
@@ -1604,19 +1377,7 @@ impl App {
                 self.history.delete_since(secs);
                 self.ui_eval("fx.historyChanged()");
             }
-            UiCmd::Restart => {
-                self.settings.save();
-                self.save_session();
-                self.window.set_visible(false);
-                self.popup = None;
-                for t in &mut self.tabs {
-                    t.wv = None;
-                }
-                if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe).spawn();
-                }
-                exit_now();
-            }
+            UiCmd::Restart => self.begin_exit(Exit::Restart),
             UiCmd::ResetSettings => {
                 let (ubo, clean) = (self.settings.ubo_offered, self.settings.ext_cleanup_done);
                 self.settings = Settings { ubo_offered: ubo, ext_cleanup_done: clean, ..Settings::default() };
@@ -1625,17 +1386,12 @@ impl App {
             UiCmd::OpenDownloads => {
                 if let Some(dir) = download_dir_of(&self.settings) {
                     let _ = std::fs::create_dir_all(&dir);
-                    #[cfg(target_os = "windows")]
                     let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-                    #[cfg(target_os = "linux")]
-                    let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
-                    #[cfg(target_os = "macos")]
-                    let _ = std::process::Command::new("open").arg(&dir).spawn();
                 }
             }
             UiCmd::Reload => {
                 if let Some(wv) = self.active_wv() {
-                    let _ = wv.reload();
+                    wv.reload();
                 }
             }
             UiCmd::Home => self.navigate_active(self.resolve_input(&self.settings.home_url.clone())),
@@ -1693,41 +1449,22 @@ impl App {
                 } else {
                     self.new_tab(url.into(), false);
                 }
-                if name == "extensions" {
-                    self.ext_refresh();
-                }
             }
-            UiCmd::ExtInstall { input } => self.ext_install(&input),
-            UiCmd::ExtRemove { id } => self.ext_remove(id),
-            UiCmd::ExtEnable { id, on } => self.ext_enable(id, on),
-            UiCmd::ExtOpen { id, page } => {
-                // La page à ouvrir vient du manifeste lu sur le disque, jamais de l'interface.
-                let target = self.exts.iter().find(|e| e.id == id).and_then(|e| match page.as_str() {
-                    "popup" => e.popup.clone(),
-                    "options" => e.options.clone(),
-                    _ => None,
-                });
-                if let Some(rel) = target {
-                    let url = format!("chrome-extension://{id}/{rel}");
-                    if page == "popup" { self.open_ext_popup(url) } else { self.new_tab(url, false) }
-                }
+            UiCmd::ExtInstall { .. } | UiCmd::ExtRemove { .. } | UiCmd::ExtEnable { .. } | UiCmd::ExtOpen { .. } => {
+                self.ext_set_status(false, EXT_UNSUPPORTED.into());
             }
             UiCmd::ClearData => {
                 // Le contexte (profil) est partagé par toutes les vues.
-                let _ = self.ui.clear_all_browsing_data();
+                engine::clear_browsing_data();
                 self.notice = Some(serde_json::json!({"kind": "cleared", "url": ""}));
                 self.push_state();
             }
         }
     }
 
-    // ------------------------------------------------------------- extensions
+    // ---------------------------------------------------------------- réglages
     fn apply_settings(&mut self) {
-        #[cfg(target_os = "windows")]
-        {
-            winstyle::border_color(&self.window, &self.settings.accent);
-            extensions::wv2::set_autofill(&self.ui, self.settings.autofill, self.settings.save_passwords);
-        }
+        winstyle::border_color(&self.window, &self.settings.accent);
         self.shared.adblock.store(self.settings.adblock, Ordering::Relaxed);
         self.shared.https_only.store(self.settings.https_only, Ordering::Relaxed);
         self.shared.block_perms.store(self.settings.block_permissions, Ordering::Relaxed);
@@ -1787,74 +1524,14 @@ impl App {
         self.ui_eval(&format!("fx.icons({map})"));
     }
 
-    fn ext_refresh(&mut self) {
-        #[cfg(target_os = "windows")]
-        {
-            let p = self.proxy.clone();
-            if let Err(e) = extensions::wv2::list(&self.ui, move |l| {
-                let _ = p.send_event(UserEvent::ExtList(l));
-            }) {
-                self.ext_status = Some((false, e));
-            }
-        }
-    }
-
-    fn ext_install(&mut self, input: &str) {
-        if !extensions::SUPPORTED {
-            return self.ext_set_status(false, "Les extensions Chrome ne sont prises en charge que sous Windows (WebView2).".into());
-        }
-        let Some(id) = extensions::parse_store_id(input) else {
-            return self.ext_set_status(false, "Lien ou ID invalide. Collez l'adresse de la page de l'extension sur le Chrome Web Store.".into());
-        };
-        self.ext_set_status(true, "Téléchargement depuis le Chrome Web Store…".into());
-        let p = self.proxy.clone();
-        std::thread::spawn(move || {
-            let _ = p.send_event(UserEvent::ExtDownloaded(extensions::download_and_unpack(&id)));
-        });
-    }
-
-    fn ext_add(&mut self, path: std::path::PathBuf) {
-        let _ = &path;
-        #[cfg(target_os = "windows")]
-        {
-            self.ext_set_status(true, "Installation…".into());
-            let p = self.proxy.clone();
-            if let Err(e) = extensions::wv2::add(&self.ui, &path, move |r| {
-                let _ = p.send_event(UserEvent::ExtAdded(r));
-            }) {
-                self.ext_set_status(false, e);
-            }
-        }
-    }
-
-    fn ext_remove(&mut self, id: String) {
-        let _ = &id;
-        #[cfg(target_os = "windows")]
-        {
-            let p = self.proxy.clone();
-            let id2 = id.clone();
-            if let Err(e) = extensions::wv2::remove(&self.ui, id, move |ok| {
-                let _ = p.send_event(UserEvent::ExtChanged(Some(id2), ok));
-            }) {
-                self.ext_set_status(false, e);
-            }
-        }
-    }
-
-    fn ext_enable(&mut self, id: String, on: bool) {
-        let _ = (&id, on);
-        #[cfg(target_os = "windows")]
-        {
-            let p = self.proxy.clone();
-            if let Err(e) = extensions::wv2::enable(&self.ui, id, on, move |ok| {
-                let _ = p.send_event(UserEvent::ExtChanged(None, ok));
-            }) {
-                self.ext_set_status(false, e);
-            }
-        }
-    }
-
     fn tick(&mut self) {
+        if let Some((_, since)) = self.exiting {
+            // Le moteur n'a pas tout fermé à temps : on s'arrête quand même.
+            if engine::live_browsers() == 0 || since.elapsed() > Duration::from_secs(3) {
+                self.finish_exit();
+            }
+            return;
+        }
         self.ticks = self.ticks.wrapping_add(1);
         if self.session_dirty && self.settings.restore_session {
             self.save_session();
@@ -1863,26 +1540,7 @@ impl App {
         if !self.focused && self.ticks % 3 != 0 {
             return;
         }
-        // Suspension des onglets cachés depuis plus de 30 s.
-        #[cfg(target_os = "windows")]
-        if self.settings.suspend_bg {
-            let active = self.active;
-            for t in self.tabs.iter_mut() {
-                if Some(t.id) != active && !t.suspended && t.last_active.elapsed() > Duration::from_secs(30) {
-                    if let Some(wv) = &t.wv {
-                        t.suspended = extensions::wv2::try_suspend(wv);
-                    }
-                }
-            }
-        }
         self.usage = self.monitor.sample();
-        #[cfg(target_os = "windows")]
-        if self.panel.as_deref() == Some("control") {
-            let p = self.proxy.clone();
-            extensions::wv2::renderer_frames(&self.ui, move |r| {
-                let _ = p.send_event(UserEvent::Renderers(r));
-            });
-        }
         self.enforce_limits();
         self.push_state();
     }
@@ -1891,8 +1549,7 @@ impl App {
         // RAM par onglet : processus de rendu qui affiche son cadre principal
         // (si plusieurs onglets partagent un processus, sa mémoire est répartie).
         let pid_of = |t: &Tab| -> Option<u32> {
-            let f = t.frame_id?;
-            self.renderers.iter().find(|(_, frames)| frames.contains(&f)).map(|(pid, _)| *pid)
+            t.pid
         };
         let mut shares: std::collections::HashMap<u32, usize> = Default::default();
         for t in self.tabs.iter().filter(|t| t.wv.is_some()) {
@@ -1927,7 +1584,7 @@ impl App {
                     "can_back": t.can_back,
                     "can_fwd": t.can_fwd,
                     "mem": mem,
-                    "suspended": t.suspended,
+                    "suspended": false,
                     "shared": shared,
                 })
             })
@@ -1944,7 +1601,7 @@ impl App {
                 "ram": self.usage.ram_mb, "cpu": self.usage.cpu_pct, "procs": self.usage.procs,
                 "sys_total": self.usage.sys_total_mb, "sys_used": self.usage.sys_used_mb,
                 "cats": self.usage.categories,
-                "per_tab": cfg!(target_os = "windows"),
+                "per_tab": true,
             }) },
             "history_count": self.history.len(),
             "blocked_total": self.blocked_total,
@@ -1957,17 +1614,16 @@ impl App {
                 "radius": if self.window.is_maximized() { 0 } else { self.corner_radius },
             },
             "maximized": self.window.is_maximized(),
-            "exts": self.exts,
+            "exts": [],
             "fullscreen": self.fullscreen,
-            "popup": self.popup.is_some(),
+            "popup": false,
             "closed": self.closed.len(),
-            "restart_needed": (self.settings.allow_autoplay, self.settings.hardware_accel, self.settings.eco_mode) != self.boot_flags
-                && cfg!(target_os = "windows"),
-            "ext_supported": extensions::SUPPORTED,
+            "restart_needed": boot_flags(&self.settings) != self.boot_flags,
+            "ext_supported": false,
             "ext_status": self.ext_status.as_ref().map(|(busy, msg)| serde_json::json!({"busy": busy, "msg": msg})),
             "about": {
                 "version": env!("CARGO_PKG_VERSION"),
-                "engine": if cfg!(target_os = "windows") { "Microsoft Edge WebView2" } else if cfg!(target_os = "macos") { "WebKit (WKWebView)" } else { "WebKitGTK" },
+                "engine": format!("Chromium {} (CEF), intégré à Ferrox", engine::chromium_version()),
                 "downloads": dirs::download_dir().map(|d| d.display().to_string()).unwrap_or_default(),
                 "config": config::config_dir().display().to_string(),
             },
@@ -1978,40 +1634,8 @@ impl App {
         if *self.last_state.borrow() == js {
             return;
         }
-        let _ = self.ui.evaluate_script(&js);
+        self.ui.eval(&js);
         *self.last_state.borrow_mut() = js;
-    }
-}
-
-/// Réglages WebKitGTK supplémentaires (Linux).
-#[cfg(target_os = "linux")]
-fn harden_linux(wv: &WebView, s: &Settings, fullscreen: impl Fn(bool) + Clone + 'static) {
-    use webkit2gtk::{CacheModel, HardwareAccelerationPolicy, SettingsExt, WebContextExt, WebViewExt, WebsiteDataManagerExt};
-    use wry::WebViewExtUnix;
-    let wk = wv.webview();
-    // Vidéo en plein écran : Ferrox agrandit la vue à toute la fenêtre.
-    let f2 = fullscreen.clone();
-    wk.connect_enter_fullscreen(move |_| { fullscreen(true); false });
-    wk.connect_leave_fullscreen(move |_| { f2(false); false });
-    if let Some(st) = WebViewExt::settings(&wk) {
-        if !s.hardware_accel {
-            st.set_hardware_acceleration_policy(HardwareAccelerationPolicy::Never);
-        }
-        st.set_enable_dns_prefetching(false);
-        st.set_javascript_can_open_windows_automatically(false);
-        st.set_enable_page_cache(false); // économise la RAM
-        st.set_enable_webgl(!s.anti_fingerprint);
-        st.set_enable_webaudio(!s.anti_fingerprint);
-        st.set_enable_media_stream(!s.block_permissions);
-        st.set_enable_developer_extras(cfg!(debug_assertions));
-        st.set_allow_file_access_from_file_urls(false);
-        st.set_allow_universal_access_from_file_urls(false);
-    }
-    if let Some(ctx) = wk.context() {
-        ctx.set_cache_model(CacheModel::DocumentBrowser);
-        if let Some(dm) = ctx.website_data_manager() {
-            dm.set_itp_enabled(true); // Intelligent Tracking Prevention
-        }
     }
 }
 
@@ -2044,8 +1668,8 @@ const PRIVACY_SCRIPT: &str = r#"(() => {
     if (c) { e.preventDefault(); e.stopPropagation(); send('k:' + c); }
   }, true);
   addEventListener('mousedown', (e) => { if (e.isTrusted) send('x'); }, true);
-  // Raccourcis de la page d'accueil (document about:blank de Ferrox uniquement).
-  if (location.href === 'about:blank') {
+  // Raccourcis de la page d'accueil (document chargé par Ferrox uniquement).
+  if (location.protocol === 'data:') {
     document.addEventListener('fx-tiles', (e) => {
       if (typeof e.detail === 'string' && e.detail.length < 16000) send('h:' + e.detail);
     });

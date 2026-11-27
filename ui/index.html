@@ -538,10 +538,9 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
   // Canal privé vers Ferrox : fonction native capturée au chargement + clé remise par Ferrox.
   const __apply = Reflect.apply, __stringify = JSON.stringify;
   const __post = (() => {
-    const w = window.chrome && window.chrome.webview;
-    if (w && w.postMessage) { const f = w.postMessage; return (m) => __apply(f, w, [m]); }
-    const hh = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc;
-    if (hh && hh.postMessage) { const f = hh.postMessage; return (m) => __apply(f, hh, [m]); }
+    // fonction native fournie par Ferrox à la seule page de l'interface
+    const f = window.__fxPost;
+    if (typeof f === 'function') return (m) => __apply(f, null, [m]);
     return () => {};
   })();
   let TOKEN = null;
@@ -807,7 +806,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         toggle('adblock', 'Bloqueur pubs & traqueurs', 'S\'applique aux pages rechargées'),
         toggle('https_only', 'Mode HTTPS uniquement', 'Bloque les connexions non chiffrées'),
         toggle('block_permissions', 'Bloquer caméra / micro / position', 'Refus automatique des permissions'),
-        toggle('anti_fingerprint', 'Anti-empreinte strict', 'Désactive WebGL et WebAudio')),
+        toggle('anti_fingerprint', 'Anti-empreinte strict', 'Désactive WebGL (redémarrage requis)')),
       h('div', { class: 'card' }, h('small', { style: 'color:var(--dim)' },
         'Toujours actifs : Global Privacy Control, Do-Not-Track, pas de préchargement DNS, popups → onglets, schémas file:// et javascript: refusés, processus web isolés dans un bac à sable, SmartScreen anti-phishing (Windows).')),
       h('button', { class: 'btn', onclick: () => send({ cmd: 'clear_data' }) }, 'Effacer cookies & données de navigation'));
@@ -895,7 +894,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         slider('hibernate_after_min', 'Veille après inactivité', '', 0, 60, 1, (v) => v ? v + ' min' : 'jamais')),
       h('h3', {}, 'Onglets · ' + S.tabs.length), tabsCard,
       h('div', { class: 'card' }, h('small', { style: 'color:var(--dim);line-height:1.5;display:block' },
-        'Mémoire privée, mesurée comme le Gestionnaire des tâches. Celui-ci affiche Ferrox.exe (l\'interface) à part : les processus du moteur y sont rangés sous « Microsoft Edge WebView2 ».')));
+        'Mémoire privée, mesurée comme le Gestionnaire des tâches. Tous les processus du navigateur (pages, carte graphique, réseau) sont des processus Ferrox, regroupés sous Ferrox dans le Gestionnaire des tâches.')));
   }
 
   // Valeurs qui changent toutes les 2 s : mises à jour sur place (pas de reconstruction).
@@ -1095,7 +1094,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
   function panelExtensions(p) {
     p.append(h('h2', {}, 'Extensions'));
     if (!S.ext_supported) {
-      p.append(h('div', { class: 'card' }, h('small', { style: 'color:var(--dim)' }, 'Les extensions Chrome nécessitent Windows (moteur WebView2).')));
+      p.append(h('div', { class: 'card' }, h('small', { style: 'color:var(--dim);line-height:1.5;display:block' }, 'Les extensions du Chrome Web Store ne sont pas disponibles avec le moteur Chromium embarqué. Le bloqueur de pubs et de pisteurs de Ferrox est intégré et toujours actif (bouclier).')));
     } else if (!S.exts.length) {
       p.append(h('div', { class: 'card empty' }, icon(ICON.puzzle), 'Aucune extension installée'));
     } else {
@@ -1184,7 +1183,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     dlInput.value = S.settings.download_dir;
     dlInput.addEventListener('change', () => setS({ download_dir: dlInput.value.trim() }));
     const zoomDd = dropdown([50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200].map((z) => ({ label: z + ' %', hint: z === 100 ? 'par défaut' : '', value: z })), S.settings.default_zoom, (v) => setS({ default_zoom: v }));
-    const restartWin = S.ext_supported ? 'Nécessite un redémarrage de Ferrox.' : '';
+    const restartWin = 'Nécessite un redémarrage de Ferrox.';
 
     main.append(
       h('label', { class: 'pg-search' }, icon(ICON.search), h('input', { id: 'pgq', placeholder: 'Rechercher un paramètre', spellcheck: 'false' })),
@@ -1210,7 +1209,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Bloqueur de publicités et de traqueurs', S.blocklist.toLocaleString('fr-FR') + ' domaines en liste · ' + S.blocked_total.toLocaleString('fr-FR') + ' bloqués cette session.', tgl('adblock'), 'pub adblock'),
         row('Mode HTTPS uniquement', 'Bloque les connexions non chiffrées (vous pouvez autoriser un site).', tgl('https_only'), 'http'),
         row('Bloquer caméra, micro et position', 'Refuse automatiquement ces permissions aux sites.', tgl('block_permissions'), 'permissions'),
-        row('Anti-empreinte strict', 'Désactive WebGL et WebAudio (certains jeux web peuvent ne plus marcher).', tgl('anti_fingerprint'), 'fingerprint'),
+        row('Anti-empreinte strict', 'Désactive WebGL et la 3D (certains jeux web peuvent ne plus marcher). ' + restartWin, tgl('anti_fingerprint'), 'fingerprint'),
         row('Icônes de secours via DuckDuckGo', 'Si un site refuse de donner son icône (ex. Epic Games), Ferrox la demande à DuckDuckGo. Uniquement pour les raccourcis de la page d\'accueil : seul leur nom de site est envoyé, jamais votre historique.', tgl('icon_service'), 'favicon icones duckduckgo'),
         row('Afficher les icônes des sites', 'Chargées directement depuis chaque site (aucun service tiers). Désactivé : une lettre de couleur les remplace.', tgl('site_icons'), 'favicon icones'),
         row('Envoyer « Ne pas me pister »', 'Signaux Do-Not-Track et Global Privacy Control envoyés aux sites.', tgl('send_dnt'), 'dnt gpc'),
@@ -1221,8 +1220,8 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Limite de RAM', '', rng('ram_limit_mb', 256, 8192, 128, (v) => v + ' Mo'), 'ram'),
         row('Onglets actifs maximum', 'Les plus anciens sont mis en veille.', rng('max_live_tabs', 1, 20, 1, (v) => v), 'onglets'),
         row('Mise en veille après inactivité', '', rng('hibernate_after_min', 0, 60, 1, (v) => v ? v + ' min' : 'jamais'), 'veille'),
-        row('Suspendre les onglets en arrière-plan', 'Après 30 s sans être affiché, un onglet est gelé (0 % de processeur) et reprend instantanément à l\'ouverture. Les onglets qui jouent du son ne sont jamais suspendus.' + (S.ext_supported ? '' : ' Windows uniquement.'), tgl('suspend_bg'), 'cpu suspendre'),
-        row('Mode économie', 'Limite le nombre de processus de pages et allège le rendu. Pour les PC modestes. ' + (S.ext_supported ? 'Nécessite un redémarrage.' : 'Windows uniquement.'), tgl('eco_mode'), 'eco economie ram'),
+        row('Suspendre les onglets en arrière-plan', 'Après 30 s sans être affiché, un onglet est gelé (0 % de processeur) et reprend instantanément à l\'ouverture. Les onglets qui jouent du son ne sont jamais suspendus.', tgl('suspend_bg'), 'cpu suspendre'),
+        row('Mode économie', 'Limite le nombre de processus de pages et allège le rendu. Pour les PC modestes. ' + restartWin, tgl('eco_mode'), 'eco economie ram'),
         S.restart_needed ? h('div', { class: 'restart' }, h('span', {}, 'Redémarrez Ferrox pour appliquer ce changement.'), h('button', { class: 'btn2', onclick: () => send({ cmd: 'restart' }) }, 'Redémarrer')) : '')),
       sec('onglets', 'Onglets', h('div', { class: 'pg-card' },
         row('Ouvrir les nouveaux onglets à côté de l\'onglet actif', '', tgl('new_tab_next'), 'position'),
@@ -1230,11 +1229,11 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Zoom par défaut des pages', 'Ctrl + molette ou Ctrl +/- pour un onglet.', zoomDd, 'zoom'))),
       sec('saisie', 'Saisie automatique et mots de passe', h('div', { class: 'pg-card' },
         row('Saisie automatique des formulaires', 'Propose les adresses, noms… déjà saisis.', tgl('autofill'), 'formulaire autofill'),
-        row('Proposer d\'enregistrer les mots de passe', S.ext_supported ? 'Stockés chiffrés dans votre profil Windows.' : 'Windows uniquement.', tgl('save_passwords'), 'password mdp'))),
+        row('Proposer d\'enregistrer les mots de passe', 'Pas encore disponible avec le moteur Chromium embarqué : utilisez un gestionnaire de mots de passe.', tgl('save_passwords'), 'password mdp'))),
       sec('contenu', 'Contenu des sites', h('div', { class: 'pg-card' },
         row('Lecture automatique des vidéos avec le son', 'Désactivé : les vidéos attendent un clic. ' + restartWin, tgl('allow_autoplay'), 'autoplay video'))),
       sec('ext', 'Extensions', h('div', { class: 'pg-card' },
-        row('Gérer les extensions', S.ext_supported ? S.exts.length + ' installée(s) · Chrome Web Store compatible' : 'Disponible sous Windows (WebView2)',
+        row('Gérer les extensions', S.ext_supported ? S.exts.length + ' installée(s) · Chrome Web Store compatible' : 'Non disponibles avec le moteur embarqué',
           h('button', { class: 'btn2 ghost', onclick: () => send({ cmd: 'open_page', name: 'extensions' }) }, 'Ouvrir'), 'addons'))),
       sec('telechargements', 'Téléchargements', h('div', { class: 'pg-card' },
         row('Dossier de téléchargement', 'Laissez vide pour le dossier Téléchargements du système.', dlInput, 'download dossier'),
@@ -1248,7 +1247,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Rétablir les paramètres par défaut', 'Thème, recherche, confidentialité, performances… Vos extensions et données ne sont pas touchées.', resetBtn(), 'reset défaut'))),
       sec('apropos', 'À propos de Ferrox', h('div', { class: 'pg-card' },
         row('Version', '', h('span', { class: 'pill live' }, 'Ferrox ' + S.about.version), 'version'),
-        row('Moteur de rendu', 'Fourni par le système : aucun Chromium embarqué.', h('span', { class: 'mono' }, S.about.engine), 'moteur'),
+        row('Moteur de rendu', 'Chromium embarqué : tous les processus sont ceux de Ferrox, isolés dans le bac à sable.', h('span', { class: 'mono' }, S.about.engine), 'moteur'),
         row('Langage', 'Interface, sécurité et gestion des onglets.', h('span', { class: 'mono' }, 'Rust 🦀'), 'rust'),
         row('Dossier de configuration', '', h('span', { class: 'mono' }, S.about.config), 'config'))),
     );
@@ -1261,8 +1260,8 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     const busy = S.ext_status && S.ext_status.busy;
     const card = h('div', { class: 'pg-card' });
     if (!S.ext_supported) {
-      card.append(h('div', { class: 'empty' }, icon(ICON.puzzle), h('div', {}, 'Les extensions Chrome nécessitent Windows (moteur WebView2).'),
-        h('small', {}, 'WebKit (Linux / macOS) ne prend pas en charge ce format.')));
+      card.append(h('div', { class: 'empty' }, icon(ICON.puzzle), h('div', {}, 'Extensions non disponibles avec le moteur Chromium embarqué (CEF).'),
+        h('small', {}, 'Le bloqueur de pubs et de pisteurs de Ferrox est intégré : aucune extension n\'est nécessaire.')));
     } else {
       card.append(h('div', { class: 'ext-install' }, inp,
         h('button', { class: 'btn2', onclick: go, ...(busy ? { disabled: '' } : {}) }, 'Installer'),
@@ -1303,7 +1302,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     });
     main.append(h('section', { class: 'pg-sec' }, h('h4', {}, 'Extensions installées', h('span', { class: 'pill' }, S.exts.length)),
       S.exts.length ? grid : h('div', { class: 'pg-card' }, h('div', { class: 'empty' }, icon(ICON.puzzle), 'Aucune extension pour l\'instant'))),
-      h('div', { class: 'note' }, 'Les extensions s\'exécutent dans le moteur WebView2 d\'Edge, qui ne prend en charge qu\'une partie des API Chrome. Les bloqueurs (uBlock Origin Lite…), les thèmes sombres et les gestionnaires de mots de passe fonctionnent généralement. « Ouvrir » affiche la fenêtre de l\'extension sous le bouton Extensions ; Échap ou un clic ailleurs la ferme. uBlock Origin « classique » (Manifest V2) n\'est plus accepté par le moteur d\'Edge : utilisez uBlock Origin Lite, du même auteur.'));
+      S.ext_supported ? h('div', { class: 'note' }, 'Les extensions s\'exécutent dans le moteur Chromium de Ferrox.') : '');
   }
 
   let pageSig = '', lastPage = null;
