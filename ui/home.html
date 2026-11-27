@@ -25,21 +25,20 @@ button { width: 60px; border: 0; background: var(--accent); color: #fff; font-si
 .tiles a { display: block; padding: 16px 8px; background: #18181b; border: 1px solid #2a2a2f; border-radius: 10px; color: #ece8f4; text-decoration: none; font-size: 12px; transition: .15s; }
 .tiles a:hover { border-color: var(--accent); transform: translateY(-2px); }
 .tiles b { display: block; font-size: 20px; margin-bottom: 4px; color: var(--accent); }
-h1, p, form, .tiles a { animation: up .6s cubic-bezier(.2,.8,.2,1) both; }
+h1, p, form, .tiles a { animation: up .8s cubic-bezier(.22,1,.36,1) both; }
 p { animation-delay: .08s; } form { animation-delay: .16s; }
 .tiles a:nth-child(1) { animation-delay: .24s; } .tiles a:nth-child(2) { animation-delay: .29s; }
 .tiles a:nth-child(3) { animation-delay: .34s; } .tiles a:nth-child(4) { animation-delay: .39s; }
 @keyframes up { from { opacity: 0; transform: translateY(14px); } }
 .grid { animation: fade 1.2s ease both; } @keyframes fade { from { opacity: 0; } }
-.tiles a { transition: border-color .2s, transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s, background .2s; }
+.tiles a { transition: border-color .2s, transform .25s cubic-bezier(.3,1.35,.5,1), box-shadow .25s, background .2s; }
 .tiles a:hover { box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--accent) 60%, transparent); background: #1d1d21; transform: translateY(-4px); }
 .tiles a:active { transform: translateY(-1px) scale(.98); }
-.tiles b { transition: transform .3s cubic-bezier(.34,1.56,.64,1); } .tiles a:hover b { transform: scale(1.2); }
+.tiles b { transition: transform .3s cubic-bezier(.3,1.35,.5,1); } .tiles a:hover b { transform: scale(1.2); }
 button { transition: filter .2s, transform .15s; } button:hover { filter: brightness(1.15); } button:active { transform: scale(.94); }
-button span { display: inline-block; transition: transform .25s cubic-bezier(.34,1.56,.64,1); } form:focus-within button span, button:hover span { transform: translateX(3px); }
+button span { display: inline-block; transition: transform .25s cubic-bezier(.3,1.35,.5,1); } form:focus-within button span, button:hover span { transform: translateX(3px); }
 body.nowall .grid { display: none; }
 body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !important; transition: none !important; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body class="__BODY__">

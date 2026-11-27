@@ -158,6 +158,8 @@ struct App {
     exts: Vec<extensions::ExtInfo>,
     /// (en cours ?, message) affiché sur la page Extensions.
     ext_status: Option<(bool, String)>,
+    /// Rayon des coins arrondis par Windows 11 (0 ailleurs).
+    corner_radius: u32,
 }
 
 fn main() {
@@ -261,8 +263,18 @@ fn main() {
         blocked_total: 0,
         exts: Vec::new(),
         ext_status: None,
+        corner_radius: 0,
         notice: None,
     };
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 11 : coins arrondis + bordure native à la couleur d'accent (suit l'arrondi).
+        if winstyle::round_corners(&app.window) {
+            app.corner_radius = 8;
+        }
+        winstyle::border_color(&app.window, &app.settings.accent);
+    }
 
     let start = std::env::args().nth(1).map(|a| app.resolve_input(&a));
     app.new_tab(start.as_deref().unwrap_or(HOME_URL).to_string(), false);
@@ -285,6 +297,30 @@ fn main() {
             _ => {}
         }
     });
+}
+
+#[cfg(target_os = "windows")]
+mod winstyle {
+    use tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+    };
+
+    fn set(w: &tao::window::Window, attr: i32, value: u32) -> bool {
+        // SAFETY: HWND valide de notre fenêtre, pointeur vers un u32 de 4 octets.
+        unsafe { DwmSetWindowAttribute(w.hwnd() as _, attr as u32, &value as *const u32 as _, 4) == 0 }
+    }
+
+    /// Vrai si Windows a accepté (Windows 11) ; faux sous Windows 10.
+    pub fn round_corners(w: &tao::window::Window) -> bool {
+        set(w, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND as u32)
+    }
+
+    pub fn border_color(w: &tao::window::Window, hex: &str) {
+        let c = |i: usize| u32::from_str_radix(hex.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0);
+        // COLORREF = 0x00BBGGRR
+        set(w, DWMWA_BORDER_COLOR, c(1) | (c(3) << 8) | (c(5) << 16));
+    }
 }
 
 /// Affiche une erreur bloquante (boîte de dialogue sous Windows) puis quitte.
@@ -950,6 +986,8 @@ impl App {
             }
             UiCmd::Settings { settings } => {
                 self.settings = settings.sanitized();
+                #[cfg(target_os = "windows")]
+                winstyle::border_color(&self.window, &self.settings.accent);
                 self.shared.adblock.store(self.settings.adblock, Ordering::Relaxed);
                 self.shared.https_only.store(self.settings.https_only, Ordering::Relaxed);
                 self.shared.block_perms.store(self.settings.block_permissions, Ordering::Relaxed);
@@ -1133,7 +1171,12 @@ impl App {
             "blocked_total": self.blocked_total,
             "blocklist": self.shared.blocker.len(),
             "notice": self.notice,
-            "layout": {"top": TOP_H, "border": if self.window.is_maximized() { 0 } else { BORDER }, "panel": PANEL_W},
+            "layout": {
+                "top": TOP_H,
+                "border": if self.window.is_maximized() { 0 } else { BORDER },
+                "panel": PANEL_W,
+                "radius": if self.window.is_maximized() { 0 } else { self.corner_radius },
+            },
             "maximized": self.window.is_maximized(),
             "exts": self.exts,
             "ext_supported": extensions::SUPPORTED,

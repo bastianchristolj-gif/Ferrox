@@ -18,7 +18,7 @@ wry = "0.58.2"
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_Foundation"] }
 webview2-com = "0.39"
 windows = { version = "0.62", features = ["Win32_Foundation"] }
 windows-core = "0.62"
