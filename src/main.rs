@@ -408,6 +408,20 @@ mod winstyle {
     }
 }
 
+/// Quitte le processus de façon garantie.
+/// Sous Windows, la sortie normale décharge les bibliothèques du moteur WebView2, ce qui peut
+/// rester bloqué : un chien de garde termine le processus si la sortie n'a pas abouti en 1,5 s.
+fn exit_now() -> ! {
+    #[cfg(target_os = "windows")]
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_millis(1500));
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        // SAFETY: termine notre propre processus ; les fichiers ont déjà été enregistrés.
+        unsafe { TerminateProcess(GetCurrentProcess(), 0) };
+    });
+    std::process::exit(0)
+}
+
 /// Affiche une erreur bloquante (boîte de dialogue sous Windows) puis quitte.
 fn fatal(msg: &str) -> ! {
     eprintln!("{msg}");
@@ -1140,6 +1154,15 @@ impl App {
                     })
                     .collect();
                 self.exts.sort_by_key(|e| e.name.to_lowercase());
+                if !self.settings.ext_cleanup_done {
+                    // Une seule fois : ne garde que uBlock Origin Lite (demandé par l'utilisateur).
+                    self.settings.ext_cleanup_done = true;
+                    self.settings.save();
+                    let others: Vec<String> = self.exts.iter().filter(|e| e.id != extensions::UBOL_ID).map(|e| e.id.clone()).collect();
+                    for id in others {
+                        self.ext_remove(id);
+                    }
+                }
                 if !self.ubo_checked {
                     self.ubo_checked = true;
                     if !self.settings.ubo_offered {
@@ -1349,12 +1372,19 @@ impl App {
     fn quit(&mut self) -> ! {
         self.settings.save();
         self.save_session();
+        // La fenêtre disparaît tout de suite, même si le moteur met du temps à s'arrêter.
+        self.window.set_visible(false);
         if self.settings.clear_on_exit {
             let _ = self.ui.clear_all_browsing_data();
             // laisse un court délai au moteur pour effacer (sinon : refait au prochain démarrage)
             std::thread::sleep(Duration::from_millis(400));
         }
-        std::process::exit(0)
+        // Libère proprement les vues web avant de sortir.
+        self.popup = None;
+        for t in &mut self.tabs {
+            t.wv = None;
+        }
+        exit_now()
     }
 
     fn cycle(&mut self, forward: bool) {
@@ -1427,14 +1457,19 @@ impl App {
             UiCmd::Restart => {
                 self.settings.save();
                 self.save_session();
+                self.window.set_visible(false);
+                self.popup = None;
+                for t in &mut self.tabs {
+                    t.wv = None;
+                }
                 if let Ok(exe) = std::env::current_exe() {
                     let _ = std::process::Command::new(exe).spawn();
                 }
-                std::process::exit(0);
+                exit_now();
             }
             UiCmd::ResetSettings => {
-                let ubo = self.settings.ubo_offered;
-                self.settings = Settings { ubo_offered: ubo, ..Settings::default() };
+                let (ubo, clean) = (self.settings.ubo_offered, self.settings.ext_cleanup_done);
+                self.settings = Settings { ubo_offered: ubo, ext_cleanup_done: clean, ..Settings::default() };
                 self.apply_settings();
             }
             UiCmd::OpenDownloads => {
@@ -1462,8 +1497,8 @@ impl App {
             }
             UiCmd::Settings { settings } => {
                 // Le drapeau interne n'est jamais modifiable depuis l'interface.
-                let ubo = self.settings.ubo_offered;
-                self.settings = Settings { ubo_offered: ubo, ..settings }.sanitized();
+                let (ubo, clean) = (self.settings.ubo_offered, self.settings.ext_cleanup_done);
+                self.settings = Settings { ubo_offered: ubo, ext_cleanup_done: clean, ..settings }.sanitized();
                 self.apply_settings();
             }
             UiCmd::AllowHttp { url } => {

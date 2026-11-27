@@ -1,6 +1,6 @@
 [package]
 name = "ferrox"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 description = "Ferrox — navigateur web gaming léger et sécurisé, écrit en Rust"
 license = "MIT"

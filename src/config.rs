@@ -100,6 +100,8 @@ pub struct Settings {
     pub clear_on_exit: bool,
     /// Ferrox a déjà proposé uBlock Origin Lite (installation automatique au 1er lancement).
     pub ubo_offered: bool,
+    /// Nettoyage unique des extensions (ne garder que uBlock Origin Lite) déjà effectué.
+    pub ext_cleanup_done: bool,
 
     // --- "Control" : limiteurs de ressources ---
     /// Limite de RAM (Mo) — au-delà, les onglets en arrière-plan sont mis en veille.
@@ -142,6 +144,7 @@ impl Default for Settings {
             send_dnt: true,
             clear_on_exit: false,
             ubo_offered: false,
+            ext_cleanup_done: false,
             ram_limit_mb: 1536,
             ram_limiter: true,
             max_live_tabs: 6,
