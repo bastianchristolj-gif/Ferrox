@@ -56,6 +56,8 @@ pub struct Settings {
     pub home_tiles: Vec<Tile>,
     /// Affiche les icônes des sites (chargées depuis les sites eux-mêmes).
     pub site_icons: bool,
+    /// Si un site refuse de donner son icône, la demander à DuckDuckGo (raccourcis uniquement).
+    pub icon_service: bool,
     /// Enregistre l'historique de navigation.
     pub history_enabled: bool,
     // --- Onglets / démarrage ---
@@ -123,6 +125,7 @@ impl Default for Settings {
             show_ram: true,
             home_tiles: default_tiles(),
             site_icons: true,
+            icon_service: true,
             history_enabled: true,
             restore_session: false,
             quit_on_last_tab: true,

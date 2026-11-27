@@ -87,6 +87,7 @@ enum UserEvent {
     Favicon(u64, String),
     NetBlocked(u64),
     Icon(String, Option<String>),
+    EngineIcon(u64, Vec<u8>),
     Renderers(Vec<(u32, Vec<u32>)>),
     HomeTiles(u64, Vec<config::Tile>),
     Fullscreen(u64, bool),
@@ -950,6 +951,12 @@ impl App {
                 }
             } });
             self.tabs[idx].frame_id = extensions::wv2::main_frame_id(&wv);
+            if !private {
+                let p = p.clone();
+                extensions::wv2::on_favicon_image(&wv, move |png| {
+                    let _ = p.send_event(UserEvent::EngineIcon(id, png));
+                });
+            }
             if adblock {
                 let p = p.clone();
                 extensions::wv2::network_block(&wv, &self.net_domains, move || {
@@ -1152,6 +1159,16 @@ impl App {
                     self.settings.home_tiles = config::sanitize_tiles(tiles);
                     self.settings.save();
                     self.refresh_icons();
+                }
+            }
+            UserEvent::EngineIcon(id, png) => {
+                // Icône vue par le moteur pendant la visite : on la garde si on n'en a pas de
+                // meilleure (une icône trouvée dans la page est souvent en plus haute définition).
+                if let Some(i) = self.idx(id) {
+                    let host = icons::host_key(&self.tabs[i].url);
+                    if !host.is_empty() && self.settings.site_icons && !self.icon_map.contains_key(&host) {
+                        let _ = self.proxy.send_event(UserEvent::Icon(host, Some(icons::png_data_url(&png))));
+                    }
                 }
             }
             UserEvent::Icon(host, data) => {
@@ -1705,10 +1722,11 @@ impl App {
         if !self.settings.site_icons {
             return;
         }
-        let mut urls: Vec<String> = self.settings.home_tiles.iter().map(|t| t.url.clone()).collect();
-        urls.extend(self.history.top_sites(8).into_iter().map(|(_, url, _, _)| url));
+        // (url, service de secours autorisé ?) : raccourcis oui, sites de l'historique non.
+        let mut urls: Vec<(String, bool)> = self.settings.home_tiles.iter().map(|t| (t.url.clone(), self.settings.icon_service)).collect();
+        urls.extend(self.history.top_sites(8).into_iter().map(|(_, url, _, _)| (url, false)));
         let mut todo = Vec::new();
-        for url in urls {
+        for (url, service) in urls {
             let host = icons::host_key(&url);
             if host.is_empty() || self.icons_pending.contains(&host) {
                 continue;
@@ -1717,20 +1735,20 @@ impl App {
                 Some((data, fresh)) => {
                     self.icon_map.insert(host.clone(), data);
                     if !fresh {
-                        todo.push((host, url));
+                        todo.push((host, url, service));
                     }
                 }
-                None => todo.push((host, url)),
+                None => todo.push((host, url, service)),
             }
         }
-        for (h, _) in &todo {
+        for (h, _, _) in &todo {
             self.icons_pending.insert(h.clone());
         }
         if !todo.is_empty() {
             let p = self.proxy.clone();
             std::thread::spawn(move || {
-                for (host, url) in todo {
-                    let _ = p.send_event(UserEvent::Icon(host, icons::fetch(&url)));
+                for (host, url, service) in todo {
+                    let _ = p.send_event(UserEvent::Icon(host, icons::fetch(&url, service)));
                 }
             });
         }

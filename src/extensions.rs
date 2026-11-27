@@ -389,6 +389,42 @@ pub mod wv2 {
         }
     }
 
+    /// Image de l'icône telle que le moteur l'a déjà téléchargée (PNG). Fiable même pour les
+    /// sites qui refusent les programmes autres que les navigateurs (ex. Epic Games).
+    pub fn on_favicon_image(wv: &wry::WebView, cb: impl Fn(Vec<u8>) + Clone + 'static) {
+        let Ok(w15) = wv.webview().cast::<ICoreWebView2_15>() else { return };
+        let handler = webview2_com::FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+            let Some(w) = sender.and_then(|s| s.cast::<ICoreWebView2_15>().ok()) else { return Ok(()) };
+            let cb = cb.clone();
+            let done = webview2_com::GetFaviconCompletedHandler::create(Box::new(move |hr, stream| {
+                if let (Ok(()), Some(stream)) = (hr, stream) {
+                    let mut out = Vec::new();
+                    let mut buf = [0u8; 16 * 1024];
+                    loop {
+                        let mut n = 0u32;
+                        let r = unsafe { stream.Read(buf.as_mut_ptr() as *mut _, buf.len() as u32, Some(&mut n)) };
+                        if r.is_err() || n == 0 || out.len() > 512 * 1024 {
+                            break;
+                        }
+                        out.extend_from_slice(&buf[..n as usize]);
+                    }
+                    if out.len() > 64 && out.starts_with(&[0x89, b'P', b'N', b'G']) {
+                        cb(out);
+                    }
+                }
+                Ok(())
+            }));
+            unsafe {
+                let _ = w.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &done);
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        unsafe {
+            let _ = w15.add_FaviconChanged(&handler, &mut token);
+        }
+    }
+
     /// Identifiant du cadre principal d'une vue (pour relier un onglet à son processus).
     pub fn main_frame_id(wv: &wry::WebView) -> Option<u32> {
         let w = wv.webview().cast::<ICoreWebView2_20>().ok()?;

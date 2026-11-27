@@ -187,11 +187,34 @@ pub fn page_variants(page_url: &str) -> Vec<String> {
 }
 
 /// Trouve et télécharge la meilleure icône d'un site. Bloquant (thread secondaire).
-pub fn fetch(page_url: &str) -> Option<String> {
+/// `service` : si le site refuse, demander l'icône au service de DuckDuckGo (seul le nom
+/// du site lui est envoyé) — utilisé uniquement pour les raccourcis de la page d'accueil.
+pub fn fetch(page_url: &str, service: bool) -> Option<String> {
     if !page_url.starts_with("https://") {
         return None;
     }
-    page_variants(page_url).iter().find_map(|u| fetch_one(u))
+    page_variants(page_url).iter().find_map(|u| fetch_one(u)).or_else(|| {
+        if !service {
+            return None;
+        }
+        let host = host_key(page_url);
+        let ok = !host.is_empty() && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+        if !ok {
+            return None;
+        }
+        let bytes = get(&crate::extensions::http_agent(), &format!("https://icons.duckduckgo.com/ip3/{host}.ico"), MAX_ICON)?;
+        // le service renvoie une icône grise générique pour les sites inconnus (~ 100 octets)
+        if bytes.len() < 200 {
+            return None;
+        }
+        let mime = sniff(&bytes)?;
+        Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
+    })
+}
+
+/// Icône PNG fournie par le moteur → data URL.
+pub fn png_data_url(bytes: &[u8]) -> String {
+    format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 fn fetch_one(page_url: &str) -> Option<String> {
@@ -280,7 +303,7 @@ mod net_tests {
     #[ignore]
     fn real_fetch() {
         for url in ["https://github.com", "https://crates.io", "https://www.rust-lang.org"] {
-            match super::fetch(url) {
+            match super::fetch(url, false) {
                 Some(d) => println!("{url} → {} ({} octets)", &d[..d.find(';').unwrap_or(20)], d.len()),
                 None => println!("{url} → aucune icône (réseau bloqué ?)"),
             }

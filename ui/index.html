@@ -1211,6 +1211,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Mode HTTPS uniquement', 'Bloque les connexions non chiffrées (vous pouvez autoriser un site).', tgl('https_only'), 'http'),
         row('Bloquer caméra, micro et position', 'Refuse automatiquement ces permissions aux sites.', tgl('block_permissions'), 'permissions'),
         row('Anti-empreinte strict', 'Désactive WebGL et WebAudio (certains jeux web peuvent ne plus marcher).', tgl('anti_fingerprint'), 'fingerprint'),
+        row('Icônes de secours via DuckDuckGo', 'Si un site refuse de donner son icône (ex. Epic Games), Ferrox la demande à DuckDuckGo. Uniquement pour les raccourcis de la page d\'accueil : seul leur nom de site est envoyé, jamais votre historique.', tgl('icon_service'), 'favicon icones duckduckgo'),
         row('Afficher les icônes des sites', 'Chargées directement depuis chaque site (aucun service tiers). Désactivé : une lettre de couleur les remplace.', tgl('site_icons'), 'favicon icones'),
         row('Envoyer « Ne pas me pister »', 'Signaux Do-Not-Track et Global Privacy Control envoyés aux sites.', tgl('send_dnt'), 'dnt gpc'),
         row('Effacer les données à la fermeture', 'Cookies, cache et stockage supprimés quand vous quittez Ferrox.', tgl('clear_on_exit'), 'cookies quitter'),
