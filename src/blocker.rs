@@ -66,14 +66,6 @@ impl Blocker {
         Self { domains }
     }
 
-    /// Domaines bloqués (pour les filtres réseau du moteur).
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub fn domains(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.domains.iter().cloned().collect();
-        v.sort();
-        v
-    }
-
     pub fn len(&self) -> usize {
         self.domains.len()
     }

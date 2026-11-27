@@ -1,35 +1,27 @@
-## Ferrox V1
+## Ferrox V2
 
-Première version publique de Ferrox : un navigateur web léger et sécurisé pour Windows 10/11, écrit en Rust, au style « gaming ».
+Ferrox embarque maintenant son propre moteur **Chromium** (CEF) à la place de WebView2. Comme dans Opera GX, tous les processus du navigateur (pages, carte graphique, réseau) sont des processus **Ferrox** et sont regroupés sous Ferrox dans le Gestionnaire des tâches.
 
 ### Installation
-- **`Ferrox-Setup-1.0.0.exe`** : installateur. Aucun droit administrateur n'est demandé. Il crée un raccourci dans le menu Démarrer et, en option, sur le bureau, et se désinstalle depuis « Applications installées ».
-- **`Ferrox-1.0.0-windows.zip`** : contient l'installateur, une version portable (sans installation) et les empreintes SHA-256.
+- **`Ferrox-Setup-2.0.0.exe`** : installateur. Aucun droit administrateur n'est demandé. Il crée un raccourci dans le menu Démarrer et, en option, sur le bureau, et se désinstalle depuis « Applications installées ».
+- **`Ferrox-2.0.0-windows.zip`** : contient l'installateur, une version portable (sans installation) et les empreintes SHA-256.
 
 > Les fichiers ne sont pas signés numériquement. Au premier lancement, Windows peut afficher « Windows a protégé votre ordinateur » : cliquez sur *Informations complémentaires*, puis *Exécuter quand même*.
 >
-> Pour vérifier un fichier, comparez la sortie de `certutil -hashfile Ferrox-Setup-1.0.0.exe SHA256` avec `SHA256SUMS.txt`.
+> Pour vérifier un fichier, comparez la sortie de `certutil -hashfile Ferrox-Setup-2.0.0.exe SHA256` avec `SHA256SUMS.txt`.
 
-### Fonctionnalités
-- **Control**
-  - RAM et CPU réels, mesurés comme dans le Gestionnaire des tâches, avec la répartition par processus et par onglet.
-  - Limiteur de RAM et mise en veille des onglets.
-  - Suspension des onglets en arrière-plan.
-- **Sécurité**
-  - Moteur WebView2 (Edge), mis à jour par Microsoft, avec bac à sable et SmartScreen.
-  - Bloqueur de publicités et de traqueurs au niveau réseau, avec uBlock Origin Lite préinstallé.
-  - Mode HTTPS uniquement.
-  - Canal page → navigateur protégé par une clé secrète par onglet.
-- **Interface**
-  - 6 thèmes et couleur d'accent, animations fluides.
-  - Page d'accueil avec des raccourcis modifiables et les vraies icônes des sites.
-  - Menu clic droit Ferrox.
-- **Pages intégrées** : Paramètres (une page par catégorie), Historique complet (recherche, suppression par visite, par site ou par période), Extensions (Chrome Web Store).
-- **Navigation**
-  - Restauration de session et onglets privés.
-  - Vidéo en plein écran.
-  - Raccourcis clavier : Ctrl+T/W/Maj+T/H/L, Ctrl+1…9, zoom, F11.
-- **Recherche** : Brave Search (par défaut) ou Google.
+### Nouveautés
+- Moteur Chromium intégré : rien à installer à côté, et le bac à sable de Chromium protège chaque processus de page.
+- Le panneau Control mesure la RAM de chaque onglet à partir de son propre processus de page.
+- Blocage réseau des pubs et des traqueurs directement dans le moteur, y compris dans les iframes.
+- Les demandes d'autorisation (caméra, micro, position…) affichent une question par site quand le blocage des permissions est désactivé.
+- Onglets privés gardés uniquement en mémoire.
+
+### Changements à connaître
+- Les extensions du Chrome Web Store (dont uBlock Origin Lite) ne sont plus disponibles : CEF ne les prend pas en charge. Le bloqueur intégré de Ferrox reste actif.
+- SmartScreen (anti-phishing de Microsoft) n'est pas disponible dans Chromium embarqué.
+- Le moteur n'est plus mis à jour par Windows : installez les nouvelles versions de Ferrox pour recevoir les correctifs de sécurité de Chromium.
+- Les cookies et sessions de la V1 (profil WebView2) ne sont pas repris : il faut se reconnecter aux sites. Les paramètres, l'historique et les raccourcis de la page d'accueil sont conservés.
 
 ### Prérequis
-Windows 10 ou 11, 64 bits. Le moteur Microsoft Edge WebView2 est déjà présent sur ces systèmes ; l'installateur vérifie sa présence.
+Windows 10 ou 11, 64 bits.
