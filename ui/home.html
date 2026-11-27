@@ -37,10 +37,12 @@ p { animation-delay: .08s; } form { animation-delay: .16s; }
 .tiles b { transition: transform .3s cubic-bezier(.34,1.56,.64,1); } .tiles a:hover b { transform: scale(1.2); }
 button { transition: filter .2s, transform .15s; } button:hover { filter: brightness(1.15); } button:active { transform: scale(.94); }
 button span { display: inline-block; transition: transform .25s cubic-bezier(.34,1.56,.64,1); } form:focus-within button span, button:hover span { transform: translateX(3px); }
+body.nowall .grid { display: none; }
+body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
-<body>
+<body class="__BODY__">
 <div class="grid"></div>
 <main>
   <h1>FERROX</h1>

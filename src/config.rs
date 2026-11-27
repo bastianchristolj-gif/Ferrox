@@ -6,8 +6,16 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Thème (teinte des fonds) : voir THEMES.
+    pub theme: String,
     /// Couleur d'accent de l'interface (hex).
     pub accent: String,
+    /// Animations de l'interface.
+    pub animations: bool,
+    /// Fond animé (grille) sur la page Nouvel onglet.
+    pub wallpaper: bool,
+    /// Affiche la RAM utilisée dans la barre d'outils.
+    pub show_ram: bool,
     /// Moteur de recherche ; `{}` est remplacé par la requête encodée.
     pub search_url: String,
     pub home_url: String,
@@ -32,7 +40,11 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            theme: "plasma".into(),
             accent: "#fa1e4e".into(),
+            animations: true,
+            wallpaper: true,
+            show_ram: true,
             search_url: "https://duckduckgo.com/?q={}".into(),
             home_url: "ferrox://home".into(),
             adblock: true,
@@ -46,6 +58,9 @@ impl Default for Settings {
         }
     }
 }
+
+/// Thèmes disponibles (définis visuellement dans ui/index.html).
+pub const THEMES: &[&str] = &["plasma", "nebula", "glacier", "toxic", "magma", "ghost"];
 
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
@@ -89,6 +104,9 @@ impl Settings {
     /// Valide les valeurs venant du disque ou de l'interface.
     pub fn sanitized(mut self) -> Self {
         let d = Settings::default();
+        if !THEMES.contains(&self.theme.as_str()) {
+            self.theme = d.theme.clone();
+        }
         let hex_ok = self.accent.len() == 7
             && self.accent.starts_with('#')
             && self.accent[1..].chars().all(|c| c.is_ascii_hexdigit());

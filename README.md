@@ -11,7 +11,7 @@ Le binaire release fait environ **1,2 Mo**.
 | **Bouclier** | Bloqueur de publicités, de traqueurs et de cryptomineurs : blocage des navigations, de `fetch`, XHR, `sendBeacon`, des balises script/img/iframe et masquage CSS des emplacements pub. Un compteur affiche le nombre d'éléments bloqués par page. |
 | **Sécurité** | Mode HTTPS uniquement. Les permissions caméra, micro et position sont refusées. `file://` et `javascript:` sont refusés. Les popups s'ouvrent dans des onglets. Global Privacy Control et DNT sont envoyés. Option anti-empreinte (sans WebGL ni WebAudio). Onglets privés. |
 | **Linux** | Les processus web sont isolés dans un **sandbox bubblewrap** si `bwrap` est installé. ITP (anti-pistage intersites) est activé. Le préchargement DNS et le cache de pages sont désactivés. |
-| **Interface** | Couleur d'accent configurable, choix du moteur de recherche (DuckDuckGo par défaut), page d'accueil personnalisée. |
+| **Interface** | Page *Paramètres* complète (`ferrox://settings`) avec recherche, 6 thèmes, couleur d'accent libre, animations désactivables. Choix du moteur de recherche (DuckDuckGo par défaut), page d'accueil personnalisée. Fermer le dernier onglet quitte le navigateur. |
 
 ### Raccourcis
 
@@ -38,7 +38,8 @@ Ce qui est propre à Windows :
 - SmartScreen anti-phishing actif (wry le coupe par défaut, Ferrox le réactive) ;
 - télémétrie et pings coupés ;
 - sandbox Chromium de WebView2 ;
-- onglets privés en mode InPrivate.
+- onglets privés en mode InPrivate ;
+- **extensions Chrome** : sur la page *Extensions* (icône puzzle ou `ferrox://extensions`), collez le lien d'une extension du Chrome Web Store puis cliquez sur *Installer*. Vous pouvez ensuite l'activer ou la désactiver, ouvrir sa fenêtre ou ses options, ou la supprimer. WebView2 ne prend en charge qu'une partie des API Chrome : toutes les extensions ne fonctionnent pas.
 
 **Compiler sur Windows** : installer [Rust](https://rustup.rs) (avec les *Visual Studio Build Tools*), puis :
 ```powershell
@@ -82,7 +83,8 @@ cargo build --release
 
 - Le bloqueur agit au niveau des navigations et du JavaScript de la page. Il n'intercepte pas encore les requêtes au niveau réseau : une ressource déclarée en dur dans le HTML peut partir avant d'être retirée.
 - Le mode HTTPS uniquement **bloque** les liens `http://` et propose « Autoriser ce site ». Il ne réessaie pas automatiquement en HTTPS.
-- Pas encore de favoris, d'historique, d'extensions ni de restauration de session.
+- Pas encore de favoris, d'historique ni de restauration de session.
+- Extensions : Windows uniquement. Le bouton d'action d'une extension s'ouvre dans un onglet, pas dans une bulle.
 - La RAM affichée est la RSS de chaque processus. Les bibliothèques partagées sont donc un peu surcomptées.
 
 ## Structure

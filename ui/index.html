@@ -217,6 +217,112 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 .dd-item.sel::before { content: ""; position: absolute; left: 6px; width: 3px; height: 16px; border-radius: 2px; background: var(--accent); }
 .dd-item { position: relative; }
 
+/* ---------- Thèmes ---------- */
+body.noanim *, body.noanim *::before, body.noanim *::after { animation: none !important; transition: none !important; }
+body.noram #ram { display: none; }
+#tabs .tab .ic.pg { color: var(--accent); }
+.tab.active .ic.pg { color: #fff; }
+
+/* ---------- Pages internes (Paramètres / Extensions) ---------- */
+#page { position: fixed; left: var(--border); top: var(--top); right: var(--pr, var(--border)); bottom: var(--border); overflow: hidden;
+  background: radial-gradient(ellipse 80% 60% at 50% 110%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%), var(--page-bg); display: none; }
+#page.show { display: block; }
+#page.anim .pg-top, #page.anim .pg-side, #page.anim .pg-main > * { animation: fadeUp .45s var(--ease) both; }
+#page.anim .pg-side { animation-name: slideRight; }
+#page.anim .pg-main > *:nth-child(2) { animation-delay: .05s; } #page.anim .pg-main > *:nth-child(3) { animation-delay: .1s; }
+#page.anim .pg-main > *:nth-child(n+4) { animation-delay: .15s; }
+@keyframes slideRight { from { opacity: 0; transform: translateX(-16px); } }
+.pg-grid { position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: linear-gradient(#ffffff07 1px, transparent 1px), linear-gradient(90deg, #ffffff07 1px, transparent 1px); background-size: 56px 56px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 55%, #000 100%); mask-image: linear-gradient(180deg, transparent, #000 55%); }
+.pg-scroll { position: absolute; inset: 0; overflow-y: auto; scroll-behavior: smooth; }
+.pg-scroll::-webkit-scrollbar { width: 10px; } .pg-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; border: 3px solid transparent; background-clip: padding-box; }
+.pg-top { display: flex; justify-content: center; align-items: center; gap: 36px; padding: 18px 20px 10px; position: sticky; top: 0; z-index: 4;
+  background: linear-gradient(var(--page-bg) 70%, transparent); }
+.pg-top button { font-size: 14px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--dim); position: relative; padding: 4px 2px;
+  transition: color .2s, font-size .25s var(--ease), letter-spacing .25s; }
+.pg-top button:hover { color: var(--text); }
+.pg-top button.on { color: #fff; font-size: 30px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 0 24px var(--accent-glow); }
+.pg-top button.on::after { content: ""; position: absolute; left: 50%; bottom: -4px; width: 40px; height: 3px; margin-left: -20px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.pg-body { display: grid; grid-template-columns: 250px minmax(0, 720px); justify-content: center; gap: 28px; padding: 8px 28px 60px; position: relative; }
+.pg-side { position: sticky; top: 76px; align-self: start; background: color-mix(in srgb, var(--panel-bg) 85%, transparent); border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px; backdrop-filter: blur(6px); }
+.pg-side button { width: 100%; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 10px; border-radius: 7px; color: var(--dim);
+  font-size: 11px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; text-align: left; transition: background .15s, color .15s, padding .2s var(--ease); }
+.pg-side button svg { width: 16px; height: 16px; }
+.pg-side button:hover { color: var(--text); background: var(--hover); padding-left: 14px; }
+.pg-side button.on { color: var(--text); background: color-mix(in srgb, var(--accent) 14%, var(--card)); box-shadow: inset 3px 0 0 var(--accent); }
+.pg-side button.on svg { color: var(--accent); }
+.pg-side hr { border: 0; height: 1px; background: var(--line); margin: 6px 4px; }
+.pg-search { position: sticky; top: 76px; z-index: 3; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px; margin-bottom: 8px;
+  background: var(--field); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px -12px #000; transition: border-color .2s, box-shadow .2s; }
+.pg-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 8px 24px -12px #000; }
+.pg-search svg { color: var(--dim); }
+.pg-search input { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; font-size: 13px; user-select: text; }
+.pg-sec { padding-top: 22px; scroll-margin-top: 130px; }
+.pg-sec h4 { font-size: 11px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: 1.3px; margin: 0 2px 10px; display: flex; align-items: center; justify-content: space-between; }
+.pg-card { background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid #ffffff0d; border-radius: 12px; padding: 6px 18px; transition: border-color .2s; }
+.pg-card:hover { border-color: #ffffff17; }
+.pg-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 52px; padding: 10px 0; }
+.pg-row + .pg-row { border-top: 1px solid #ffffff0b; }
+.pg-row .lab { font-size: 13px; } .pg-row .lab small { display: block; color: var(--dim); font-size: 11.5px; margin-top: 2px; max-width: 460px; }
+.pg-row .ctl { flex: none; min-width: 0; }
+.pg-row .ctl .dd { width: 230px; }
+.pg-row.hide, .pg-sec.hide { display: none; }
+.themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; padding: 12px 0 14px; }
+.theme { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.theme .pv { height: 84px; border-radius: 8px; position: relative; overflow: hidden; border: 1px solid #ffffff12;
+  transition: transform .25s var(--spring), box-shadow .25s, border-color .2s; }
+.theme .pv::before { content: ""; position: absolute; inset: 0; background: linear-gradient(135deg, transparent 55%, color-mix(in srgb, var(--c) 25%, transparent)); }
+.theme .pv i { position: absolute; left: 10px; width: 7px; height: 7px; border-radius: 1px; background: var(--c); box-shadow: 0 0 6px var(--c); }
+.theme .pv i:nth-child(1) { top: 12px; } .theme .pv i:nth-child(2) { top: 26px; } .theme .pv i:nth-child(3) { top: 40px; }
+.theme .pv b { position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--c); }
+.theme:hover .pv { transform: translateY(-3px); box-shadow: 0 10px 20px -10px var(--c); }
+.theme.on .pv { border-color: var(--c); box-shadow: 0 0 0 1px var(--c), 0 10px 24px -12px var(--c); }
+.theme .nm { display: flex; align-items: center; justify-content: space-between; font-size: 12px; padding: 0 2px; }
+.radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #8a8a92; display: grid; place-items: center; flex: none; transition: border-color .2s; }
+.radio::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); transform: scale(0); transition: transform .25s var(--spring); }
+.on > .nm .radio, .radio.on { border-color: var(--accent); } .on > .nm .radio::after, .radio.on::after { transform: scale(1); }
+.colorpick { width: 30px; height: 30px; border-radius: 8px; overflow: hidden; position: relative; border: 1px dashed #6a6a72; cursor: pointer; }
+.colorpick input { position: absolute; inset: -6px; width: 44px; height: 44px; border: 0; padding: 0; cursor: pointer; opacity: 0; }
+.colorpick span { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 16px; pointer-events: none; }
+.kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; padding: 5px 8px; border-radius: 6px; background: var(--field); border: 1px solid var(--line); border-bottom-width: 2px; color: var(--text); }
+.btn2 { height: 34px; padding: 0 16px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; transition: filter .2s, transform .12s, box-shadow .2s; white-space: nowrap; }
+.btn2:hover { filter: brightness(1.12); box-shadow: 0 6px 18px -8px var(--accent); } .btn2:active { transform: scale(.96); }
+.btn2.ghost { background: var(--field); color: var(--text); border: 1px solid var(--line); }
+.btn2.ghost:hover { border-color: var(--accent); box-shadow: none; }
+.btn2.danger { background: transparent; color: #ff6b7f; border: 1px solid #ff6b7f55; }
+.btn2.danger:hover { background: #ff4d6a; color: #fff; }
+.btn2[disabled] { opacity: .5; pointer-events: none; }
+.mono { font: 11.5px ui-monospace, Consolas, monospace; color: var(--dim); user-select: text; word-break: break-all; }
+
+/* Extensions */
+.ext-install { display: flex; gap: 10px; padding: 14px 0; }
+.ext-install .txt { flex: 1; }
+.ext-status { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--dim); padding: 0 0 12px; animation: fadeUp .3s var(--ease); }
+.ext-status .spin { border-color: #ffffff22; border-top-color: var(--accent); }
+.ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.ext { background: var(--card); border: 1px solid #ffffff0d; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  transition: border-color .2s, transform .25s var(--spring), opacity .2s; animation: fadeUp .4s var(--ease) both; }
+.ext:hover { border-color: #ffffff1f; transform: translateY(-2px); }
+.ext.off { opacity: .55; }
+.ext .hd { display: flex; align-items: center; gap: 12px; }
+.ext .ico { width: 40px; height: 40px; border-radius: 10px; background: var(--field); display: grid; place-items: center; flex: none; overflow: hidden; color: var(--accent); }
+.ext .ico img { width: 32px; height: 32px; }
+.ext .nm { flex: 1; min-width: 0; } .ext .nm b { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ext .nm small { color: var(--dim); font-size: 11px; }
+.ext p { color: var(--dim); font-size: 12px; line-height: 1.45; min-height: 34px; }
+.ext .ft { display: flex; gap: 8px; } .ext .ft .btn2 { height: 30px; padding: 0 12px; font-size: 12px; }
+.ext .ft .grow { flex: 1; }
+.empty { text-align: center; padding: 34px 10px; color: var(--dim); }
+.empty svg { width: 42px; height: 42px; margin: 0 auto 10px; color: var(--accent); opacity: .8; }
+.note { font-size: 11.5px; color: var(--dim); line-height: 1.5; padding: 14px 2px; }
+.pext { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.pext + .pext { border-top: 1px solid var(--line); }
+.pext img, .pext .ph { width: 26px; height: 26px; border-radius: 6px; flex: none; background: var(--field); }
+.pext button.n { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; transition: color .15s; }
+.pext button.n:hover { color: var(--accent); }
+
 #bg { position: fixed; left: var(--border); top: var(--top); right: var(--border); bottom: var(--border); background: #18181b; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
@@ -259,12 +365,14 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
       <span class="sep"></span>
       <button class="nb" data-panel="control" title="Control — RAM / CPU"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1.5v2.5M15 1.5v2.5M9 20v2.5M15 20v2.5M1.5 9H4M1.5 15H4M20 9h2.5M20 15h2.5"/></svg></button>
       <span id="ram" title="Mémoire utilisée par Ferrox"><b id="miniram">–</b>Mo</span>
-      <button class="nb" data-panel="settings" title="Paramètres"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+      <button class="nb" data-panel="extensions" title="Extensions"><svg viewBox="0 0 24 24"><path d="M10 3.5a2 2 0 1 1 4 0V5h3a1 1 0 0 1 1 1v3h1.5a2 2 0 1 1 0 4H18v4a1 1 0 0 1-1 1h-3v-1.5a2 2 0 1 0-4 0V18H6a1 1 0 0 1-1-1v-4h1.5a2 2 0 1 0 0-4H5V6a1 1 0 0 1 1-1h4z"/></svg></button>
+      <button class="nb" id="settingsbtn" title="Paramètres"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
     </div>
   </div>
 </header>
 
 <aside id="panel"></aside>
+<section id="page"></section>
 
 <script>
 'use strict';
@@ -288,6 +396,18 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
     globe: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
     eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM3 3l18 18', plus: 'M12 5v14M5 12h14',
     chev: 'M6 9l6 6 6-6', check: 'M5 12.5l4.5 4.5L19 7.5',
+    gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.2 14H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3.2V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 20.8 10H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+    puzzle: 'M10 3.5a2 2 0 1 1 4 0V5h3a1 1 0 0 1 1 1v3h1.5a2 2 0 1 1 0 4H18v4a1 1 0 0 1-1 1h-3v-1.5a2 2 0 1 0-4 0V18H6a1 1 0 0 1-1-1v-4h1.5a2 2 0 1 0 0-4H5V6a1 1 0 0 1 1-1h4z',
+    brush: 'M9.5 14.5L18 6a2.1 2.1 0 0 1 3 3l-8.5 8.5M9.5 14.5c-2 0-3.5 1.5-3.5 3.5 0 1-1 2-2 2 1 1 2.5 1.5 4 1.5 2.5 0 4.5-2 4.5-4.5',
+    search: 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20 20l-4.2-4.2',
+    power: 'M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0',
+    shield: 'M12 21.5s8-3.8 8-9.8V5.2L12 2.5 4 5.2v6.5c0 6 8 9.8 8 9.8z',
+    chip: 'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM9 9h6v6H9zM9 1.5V4M15 1.5V4M9 20v2.5M15 20v2.5M1.5 9H4M1.5 15H4M20 9h2.5M20 15h2.5',
+    down: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+    keys: 'M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10',
+    info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
+    store: 'M4 8h16l-1 12H5zM8 8V6a4 4 0 0 1 8 0v2',
+    trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   };
 
   let S = null, editingUrl = false;
@@ -312,9 +432,10 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
     el.classList.toggle('private', t.private);
     el.title = t.title + (t.sleeping ? ' (en veille)' : '');
     el.children[1].textContent = t.title || 'Sans titre';
-    const key = t.loading ? 'load' : t.sleeping ? 'moon' : t.private ? 'eye' : 'globe';
+    const key = t.page === 'settings' ? 'gear' : t.page === 'extensions' ? 'puzzle' : t.loading ? 'load' : t.sleeping ? 'moon' : t.private ? 'eye' : 'globe';
     if (el._ic !== key) {
       el._ic = key;
+      el.children[0].classList.toggle('pg', !!t.page);
       el.children[0].replaceChildren(key === 'load' ? h('span', { class: 'spin' }) : icon(ICON[key]));
     }
   }
@@ -479,35 +600,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
       h('button', { class: 'btn', onclick: () => send({ cmd: 'clear_data' }) }, 'Effacer cookies & données de navigation'));
   }
 
-  function panelSettings(p) {
-    const colors = ['#fa1e4e', '#a855f7', '#22d3ee', '#3ddc97', '#ff8a00', '#f5f5f5'];
-    const sw = h('div', { class: 'swatches' });
-    for (const c of colors) sw.append(h('button', { class: 'swatch' + (S.settings.accent === c ? ' on' : ''), style: 'background:' + c, title: c, onclick: () => setS({ accent: c }) }));
-    const engines = [
-      { label: 'DuckDuckGo', hint: 'privé', value: 'https://duckduckgo.com/?q={}' },
-      { label: 'Brave Search', hint: 'privé', value: 'https://search.brave.com/search?q={}' },
-      { label: 'Startpage', hint: 'privé', value: 'https://www.startpage.com/do/search?q={}' },
-      { label: 'Qwant', hint: 'européen', value: 'https://www.qwant.com/?q={}' },
-      { label: 'Google', hint: '', value: 'https://www.google.com/search?q={}' },
-    ];
-    const homes = [
-      { label: 'Page Ferrox', hint: 'par défaut', value: 'ferrox://home' },
-      { label: 'DuckDuckGo', hint: '', value: 'https://duckduckgo.com' },
-      { label: 'YouTube', hint: '', value: 'https://www.youtube.com' },
-      { label: 'Twitch', hint: '', value: 'https://www.twitch.tv' },
-    ];
-    if (!homes.some((x) => x.value === S.settings.home_url)) homes.push({ label: S.settings.home_url, hint: 'perso', value: S.settings.home_url });
-    const custom = h('input', { class: 'txt', placeholder: 'Adresse perso : https://…', style: 'margin-top:8px' });
-    custom.addEventListener('change', () => { let v = custom.value.trim(); if (!v) return; if (!/^https:\/\//i.test(v)) v = 'https://' + v.replace(/^http:\/\//i, ''); setS({ home_url: v }); });
-    p.append(h('h2', {}, 'Paramètres'),
-      h('h3', {}, 'Couleur d\'accent'), h('div', { class: 'card' }, sw),
-      h('h3', {}, 'Moteur de recherche'), h('div', { class: 'card' }, dropdown(engines, S.settings.search_url, (v) => setS({ search_url: v }))),
-      h('h3', {}, 'Page d\'accueil'), h('div', { class: 'card' }, dropdown(homes, S.settings.home_url, (v) => setS({ home_url: v })), custom),
-      h('h3', {}, 'Raccourcis'),
-      h('div', { class: 'card' }, ...[['Ctrl+T', 'Nouvel onglet'], ['Ctrl+Maj+N', 'Onglet privé'], ['Ctrl+W', 'Fermer l\'onglet'], ['Ctrl+L', 'Barre d\'adresse'], ['Ctrl+R', 'Recharger'], ['Ctrl+Tab', 'Onglet suivant']]
-        .map(([k, d]) => h('div', { class: 'row' }, h('span', {}, d), h('span', { class: 'pill' }, k)))));
-  }
-
   // Valeurs qui changent toutes les 2 s : mises à jour sur place (pas de reconstruction).
   function updateLive() {
     const ram = S.usage.ram, lim = S.settings.ram_limit_mb;
@@ -523,7 +615,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
   let panelSig = '', lastPanel = null;
   function renderPanel() {
     const p = $('#panel');
-    const sig = JSON.stringify([S.panel, S.settings, S.blocklist, S.tabs.map((t) => [t.id, t.title, t.sleeping, t.active, t.private])]);
+    const sig = JSON.stringify([S.panel, S.settings, S.blocklist, S.exts, S.tabs.map((t) => [t.id, t.title, t.sleeping, t.active, t.private])]);
     const busy = closeOpenDD || (document.activeElement && p.contains(document.activeElement) && document.activeElement.matches('input'));
     if (sig !== panelSig && !busy) {
       panelSig = sig;
@@ -532,7 +624,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
       p.replaceChildren();
       if (S.panel === 'control') panelControl(p);
       else if (S.panel === 'shield') panelShield(p);
-      else if (S.panel === 'settings') panelSettings(p);
+      else if (S.panel === 'extensions') panelExtensions(p);
       if (S.panel !== lastPanel) {
         p.scrollTop = 0;
         if (S.panel) { p.classList.remove('anim'); void p.offsetWidth; p.classList.add('anim'); setTimeout(() => p.classList.remove('anim'), 650); }
@@ -542,6 +634,241 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
     } else updateLive();
   }
 
+  // =================== Thèmes ===================
+  const THEMES = {
+    plasma:  { name: 'Plasma',    accent: '#fa1e4e', frame: '#0c0c0e', bar: '#18181b', panel: '#121214', card: '#1a1a1d', field: '#0a0a0c', page: '#0f0e12' },
+    nebula:  { name: 'Nébuleuse', accent: '#a855f7', frame: '#0d0a14', bar: '#18121f', panel: '#120e1a', card: '#1c1527', field: '#09070e', page: '#100c18' },
+    glacier: { name: 'Glacier',   accent: '#22d3ee', frame: '#090d12', bar: '#121820', panel: '#0e141b', card: '#151d27', field: '#070a0e', page: '#0b1016' },
+    toxic:   { name: 'Toxique',   accent: '#3ddc97', frame: '#0a0e0b', bar: '#131a15', panel: '#0f1511', card: '#16201a', field: '#070a08', page: '#0b110d' },
+    magma:   { name: 'Magma',     accent: '#ff8a00', frame: '#100b08', bar: '#1c1410', panel: '#17100c', card: '#211812', field: '#0c0806', page: '#130e0a' },
+    ghost:   { name: 'Fantôme',   accent: '#f5f5f5', frame: '#0b0b0c', bar: '#19191b', panel: '#131314', card: '#1c1c1e', field: '#09090a', page: '#101011' },
+  };
+  function applyTheme() {
+    const t = THEMES[S.settings.theme] || THEMES.plasma, r = document.documentElement.style;
+    r.setProperty('--frame', t.frame); r.setProperty('--bar', t.bar); r.setProperty('--panel-bg', t.panel);
+    r.setProperty('--card', t.card); r.setProperty('--field', t.field); r.setProperty('--page-bg', t.page);
+    const a = S.settings.accent.replace('#', '');
+    const lum = (0.299 * parseInt(a.slice(0, 2), 16) + 0.587 * parseInt(a.slice(2, 4), 16) + 0.114 * parseInt(a.slice(4, 6), 16));
+    r.setProperty('--on-accent', lum > 170 ? '#111' : '#fff');
+    document.body.classList.toggle('noanim', !S.settings.animations);
+    document.body.classList.toggle('noram', !S.settings.show_ram);
+  }
+
+  const extIcon = (e, cls) => e.icon ? h('img', { src: e.icon, alt: '', class: cls || '' }) : h('span', { class: cls || 'ph' }, icon(ICON.puzzle));
+
+  // =================== Panneau Extensions (barre d'outils) ===================
+  function panelExtensions(p) {
+    p.append(h('h2', {}, 'Extensions'));
+    if (!S.ext_supported) {
+      p.append(h('div', { class: 'card' }, h('small', { style: 'color:var(--dim)' }, 'Les extensions Chrome nécessitent Windows (moteur WebView2).')));
+    } else if (!S.exts.length) {
+      p.append(h('div', { class: 'card empty' }, icon(ICON.puzzle), 'Aucune extension installée'));
+    } else {
+      const c = h('div', { class: 'card' });
+      for (const e of S.exts) c.append(h('div', { class: 'pext' }, extIcon(e),
+        h('button', { class: 'n', title: e.popup ? 'Ouvrir' : e.name, onclick: () => e.popup && send({ cmd: 'ext_open', id: e.id, page: 'popup' }) }, e.name),
+        h('button', { class: 'toggle' + (e.enabled ? ' on' : ''), title: e.enabled ? 'Désactiver' : 'Activer',
+          onclick: (ev) => { ev.currentTarget.classList.toggle('on'); send({ cmd: 'ext_enable', id: e.id, on: !e.enabled }); } })));
+      p.append(c);
+    }
+    p.append(h('button', { class: 'btn', onclick: () => send({ cmd: 'open_page', name: 'extensions' }) }, 'Gérer les extensions'));
+  }
+
+  // =================== Pages internes ===================
+  const pageTop = (cur) => h('nav', { class: 'pg-top' },
+    h('button', { class: cur === 'extensions' ? 'on' : '', onclick: () => cur !== 'extensions' && send({ cmd: 'open_page', name: 'extensions' }) }, 'Extensions'),
+    h('button', { class: cur === 'settings' ? 'on' : '', onclick: () => cur !== 'settings' && send({ cmd: 'open_page', name: 'settings' }) }, 'Paramètres'));
+
+  const row = (label, sub, ctl, extra = '') => h('div', { class: 'pg-row', 'data-k': (label + ' ' + sub + ' ' + extra).toLowerCase() },
+    h('div', { class: 'lab' }, label, sub ? h('small', {}, sub) : ''), h('div', { class: 'ctl' }, ctl));
+  const tgl = (key) => h('button', { class: 'toggle' + (S.settings[key] ? ' on' : ''), role: 'switch',
+    onclick: (e) => { e.currentTarget.classList.toggle('on'); setS({ [key]: !S.settings[key] }); } });
+  const rng = (key, min, max, step, fmt) => {
+    const out = h('span', { class: 'pill live', style: 'min-width:62px;text-align:center' }, fmt(S.settings[key]));
+    const inp = h('input', { type: 'range', min, max, step, style: 'width:170px' });
+    inp.value = S.settings[key];
+    inp.addEventListener('input', () => { out.textContent = fmt(+inp.value); });
+    inp.addEventListener('change', () => setS({ [key]: +inp.value }));
+    return h('div', { style: 'display:flex;align-items:center;gap:12px' }, inp, out);
+  };
+
+  const SECTIONS = [
+    ['apparence', 'Apparence', 'brush'], ['recherche', 'Moteur de recherche', 'search'], ['demarrage', 'Au démarrage', 'power'], null,
+    ['vie-privee', 'Confidentialité et sécurité', 'shield'], ['control', 'Performances (Control)', 'chip'], ['ext', 'Extensions', 'puzzle'], null,
+    ['telechargements', 'Téléchargements', 'down'], ['raccourcis', 'Raccourcis clavier', 'keys'], ['apropos', 'À propos de Ferrox', 'info'],
+  ];
+
+  function buildSettings(main) {
+    const sec = (id, title, ...cards) => h('section', { class: 'pg-sec', id: 'sec-' + id }, h('h4', {}, title), ...cards);
+    // Thèmes
+    const themes = h('div', { class: 'themes' });
+    for (const [k, t] of Object.entries(THEMES)) {
+      const on = S.settings.theme === k;
+      themes.append(h('button', { class: 'theme' + (on ? ' on' : ''), style: '--c:' + t.accent, onclick: () => setS({ theme: k, accent: t.accent }) },
+        h('div', { class: 'pv', style: `background:linear-gradient(180deg, ${t.bar}, ${t.frame})` }, h('i'), h('i'), h('i'), h('b')),
+        h('div', { class: 'nm' }, h('span', {}, t.name), h('span', { class: 'radio' }))));
+    }
+    const sw = h('div', { class: 'swatches' });
+    for (const c of ['#fa1e4e', '#ff2d95', '#a855f7', '#6366f1', '#22d3ee', '#3ddc97', '#ff8a00', '#facc15', '#f5f5f5'])
+      sw.append(h('button', { class: 'swatch' + (S.settings.accent === c ? ' on' : ''), style: 'background:' + c, title: c, onclick: () => setS({ accent: c }) }));
+    const picker = h('input', { type: 'color' }); picker.value = S.settings.accent;
+    picker.addEventListener('change', () => setS({ accent: picker.value }));
+    sw.append(h('label', { class: 'colorpick', title: 'Couleur personnalisée' }, picker, h('span', {}, '+')));
+
+    const engines = [
+      { label: 'DuckDuckGo', hint: 'privé', value: 'https://duckduckgo.com/?q={}' },
+      { label: 'Brave Search', hint: 'privé', value: 'https://search.brave.com/search?q={}' },
+      { label: 'Startpage', hint: 'privé', value: 'https://www.startpage.com/do/search?q={}' },
+      { label: 'Qwant', hint: 'européen', value: 'https://www.qwant.com/?q={}' },
+      { label: 'Ecosia', hint: 'écolo', value: 'https://www.ecosia.org/search?q={}' },
+      { label: 'Bing', hint: '', value: 'https://www.bing.com/search?q={}' },
+      { label: 'Google', hint: '', value: 'https://www.google.com/search?q={}' },
+    ];
+    const homes = [
+      { label: 'Page Ferrox', hint: 'par défaut', value: 'ferrox://home' },
+      { label: 'DuckDuckGo', hint: '', value: 'https://duckduckgo.com' },
+      { label: 'YouTube', hint: '', value: 'https://www.youtube.com' },
+      { label: 'Twitch', hint: '', value: 'https://www.twitch.tv' },
+    ];
+    if (!homes.some((x) => x.value === S.settings.home_url)) homes.push({ label: S.settings.home_url.replace(/^https:\/\//, ''), hint: 'perso', value: S.settings.home_url });
+    const custom = h('input', { class: 'txt', placeholder: 'https://…', style: 'width:230px' });
+    custom.addEventListener('change', () => { let v = custom.value.trim(); if (!v) return; if (!/^https:\/\//i.test(v)) v = 'https://' + v.replace(/^http:\/\//i, ''); setS({ home_url: v }); });
+
+    const shortcuts = [['Ctrl+T', 'Nouvel onglet'], ['Ctrl+Maj+N', 'Onglet privé'], ['Ctrl+W', 'Fermer l\'onglet'], ['Ctrl+L', 'Barre d\'adresse'], ['Ctrl+R', 'Recharger'], ['Ctrl+Tab', 'Onglet suivant'], ['Ctrl+Maj+Tab', 'Onglet précédent'], ['Clic molette', 'Fermer un onglet']];
+
+    main.append(
+      h('label', { class: 'pg-search' }, icon(ICON.search), h('input', { id: 'pgq', placeholder: 'Rechercher un paramètre', spellcheck: 'false' })),
+      sec('apparence', 'Thèmes', h('div', { class: 'pg-card' }, themes)),
+      sec('accent', 'Couleur d\'accent', h('div', { class: 'pg-card' }, h('div', { class: 'pg-row', 'data-k': 'couleur accent' }, sw))),
+      sec('apparence2', 'Apparence', h('div', { class: 'pg-card' },
+        row('Animations', 'Transitions et effets de l\'interface. Les couper économise un peu de processeur.', tgl('animations'), 'effets'),
+        row('Afficher la RAM dans la barre d\'outils', 'Mémoire utilisée par Ferrox et ses processus.', tgl('show_ram'), 'mémoire'),
+        row('Fond animé sur la page Nouvel onglet', 'Grille lumineuse derrière la recherche.', tgl('wallpaper'), 'fond écran wallpaper'))),
+      sec('recherche', 'Moteur de recherche', h('div', { class: 'pg-card' },
+        row('Moteur utilisé dans la barre d\'adresse', 'Les moteurs « privés » ne vous pistent pas.', dropdown(engines, S.settings.search_url, (v) => setS({ search_url: v })), 'search'))),
+      sec('demarrage', 'Au démarrage et page d\'accueil', h('div', { class: 'pg-card' },
+        row('Page d\'accueil', 'Ouverte par le bouton Accueil et au démarrage.', dropdown(homes, S.settings.home_url, (v) => setS({ home_url: v })), 'home'),
+        row('Adresse personnalisée', 'Uniquement en HTTPS.', custom, 'home url'))),
+      sec('vie-privee', 'Confidentialité et sécurité', h('div', { class: 'pg-card' },
+        row('Bloqueur de publicités et de traqueurs', S.blocklist.toLocaleString('fr-FR') + ' domaines en liste · ' + S.blocked_total.toLocaleString('fr-FR') + ' bloqués cette session.', tgl('adblock'), 'pub adblock'),
+        row('Mode HTTPS uniquement', 'Bloque les connexions non chiffrées (vous pouvez autoriser un site).', tgl('https_only'), 'http'),
+        row('Bloquer caméra, micro et position', 'Refuse automatiquement ces permissions aux sites.', tgl('block_permissions'), 'permissions'),
+        row('Anti-empreinte strict', 'Désactive WebGL et WebAudio (certains jeux web peuvent ne plus marcher).', tgl('anti_fingerprint'), 'fingerprint'),
+        row('Effacer les données de navigation', 'Cookies, cache et stockage de tous les sites.', h('button', { class: 'btn2 danger', onclick: () => send({ cmd: 'clear_data' }) }, 'Effacer'), 'cookies cache'))),
+      sec('control', 'Performances (Control)', h('div', { class: 'pg-card' },
+        row('Limiteur de RAM', 'Met en veille les onglets en arrière-plan au-delà de la limite.', tgl('ram_limiter'), 'ram memoire'),
+        row('Limite de RAM', '', rng('ram_limit_mb', 256, 8192, 128, (v) => v + ' Mo'), 'ram'),
+        row('Onglets actifs maximum', 'Les plus anciens sont mis en veille.', rng('max_live_tabs', 1, 20, 1, (v) => v), 'onglets'),
+        row('Mise en veille après inactivité', '', rng('hibernate_after_min', 0, 60, 1, (v) => v ? v + ' min' : 'jamais'), 'veille'))),
+      sec('ext', 'Extensions', h('div', { class: 'pg-card' },
+        row('Gérer les extensions', S.ext_supported ? S.exts.length + ' installée(s) · Chrome Web Store compatible' : 'Disponible sous Windows (WebView2)',
+          h('button', { class: 'btn2 ghost', onclick: () => send({ cmd: 'open_page', name: 'extensions' }) }, 'Ouvrir'), 'addons'))),
+      sec('telechargements', 'Téléchargements', h('div', { class: 'pg-card' },
+        row('Dossier de téléchargement', '', h('span', { class: 'mono' }, S.about.downloads || '—'), 'download'))),
+      sec('raccourcis', 'Raccourcis clavier', h('div', { class: 'pg-card' }, ...shortcuts.map(([k, d]) => row(d, '', h('span', { class: 'kbd' }, k), k)))),
+      sec('apropos', 'À propos de Ferrox', h('div', { class: 'pg-card' },
+        row('Version', '', h('span', { class: 'pill live' }, 'Ferrox ' + S.about.version), 'version'),
+        row('Moteur de rendu', 'Fourni par le système : aucun Chromium embarqué.', h('span', { class: 'mono' }, S.about.engine), 'moteur'),
+        row('Langage', 'Interface, sécurité et gestion des onglets.', h('span', { class: 'mono' }, 'Rust 🦀'), 'rust'),
+        row('Dossier de configuration', '', h('span', { class: 'mono' }, S.about.config), 'config'))),
+    );
+  }
+
+  function buildExtensions(main) {
+    const inp = h('input', { class: 'txt', id: 'extin', placeholder: 'Collez le lien de l\'extension (chromewebstore.google.com/detail/…)' });
+    const go = () => { if (inp.value.trim()) { send({ cmd: 'ext_install', input: inp.value.trim() }); inp.value = ''; inp.blur(); } };
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    const busy = S.ext_status && S.ext_status.busy;
+    const card = h('div', { class: 'pg-card' });
+    if (!S.ext_supported) {
+      card.append(h('div', { class: 'empty' }, icon(ICON.puzzle), h('div', {}, 'Les extensions Chrome nécessitent Windows (moteur WebView2).'),
+        h('small', {}, 'WebKit (Linux / macOS) ne prend pas en charge ce format.')));
+    } else {
+      card.append(h('div', { class: 'ext-install' }, inp,
+        h('button', { class: 'btn2', onclick: go, ...(busy ? { disabled: '' } : {}) }, 'Installer'),
+        h('button', { class: 'btn2 ghost', title: 'Ouvrir le Chrome Web Store dans un nouvel onglet', onclick: () => { send({ cmd: 'new_tab', private: false }); setTimeout(() => send({ cmd: 'navigate', input: 'https://chromewebstore.google.com/category/extensions' }), 120); } }, icon(ICON.store))));
+      if (S.ext_status) card.append(h('div', { class: 'ext-status' }, busy ? h('span', { class: 'spin' }) : '', S.ext_status.msg));
+    }
+    main.append(h('section', { class: 'pg-sec' }, h('h4', {}, 'Ajouter depuis le Chrome Web Store'), card));
+
+    const grid = h('div', { class: 'ext-grid' });
+    S.exts.forEach((e, i) => {
+      let armed = false;
+      const del = h('button', { class: 'btn2 danger', title: 'Supprimer', onclick: (ev) => {
+        if (!armed) { armed = true; ev.currentTarget.textContent = 'Confirmer ?'; setTimeout(() => { armed = false; if (del.isConnected) del.replaceChildren(icon(ICON.trash)); }, 3000); return; }
+        send({ cmd: 'ext_remove', id: e.id }); } }, icon(ICON.trash));
+      grid.append(h('div', { class: 'ext' + (e.enabled ? '' : ' off'), style: `animation-delay:${Math.min(i, 8) * 40}ms` },
+        h('div', { class: 'hd' }, h('div', { class: 'ico' }, extIcon(e, ' ')),
+          h('div', { class: 'nm' }, h('b', {}, e.name), h('small', {}, (e.version ? 'v' + e.version + ' · ' : '') + e.id.slice(0, 12) + '…')),
+          h('button', { class: 'toggle' + (e.enabled ? ' on' : ''), title: e.enabled ? 'Désactiver' : 'Activer',
+            onclick: (ev) => { ev.currentTarget.classList.toggle('on'); send({ cmd: 'ext_enable', id: e.id, on: !e.enabled }); } })),
+        h('p', {}, e.description || ''),
+        h('div', { class: 'ft' },
+          e.popup ? h('button', { class: 'btn2', onclick: () => send({ cmd: 'ext_open', id: e.id, page: 'popup' }) }, 'Ouvrir') : '',
+          e.options ? h('button', { class: 'btn2 ghost', onclick: () => send({ cmd: 'ext_open', id: e.id, page: 'options' }) }, 'Options') : '',
+          h('span', { class: 'grow' }), del)));
+    });
+    main.append(h('section', { class: 'pg-sec' }, h('h4', {}, 'Extensions installées', h('span', { class: 'pill' }, S.exts.length)),
+      S.exts.length ? grid : h('div', { class: 'pg-card' }, h('div', { class: 'empty' }, icon(ICON.puzzle), 'Aucune extension pour l\'instant'))),
+      h('div', { class: 'note' }, 'Les extensions s\'exécutent dans le moteur WebView2 d\'Edge, qui ne prend en charge qu\'une partie des API Chrome. Les bloqueurs (uBlock Origin Lite…), les thèmes sombres et les gestionnaires de mots de passe fonctionnent généralement. Le bouton « Ouvrir » affiche la fenêtre de l\'extension dans un onglet.'));
+  }
+
+  let pageSig = '', lastPage = null;
+  function renderPage() {
+    const pg = $('#page'), cur = (S.tabs.find((t) => t.active) || {}).page || null;
+    document.documentElement.style.setProperty('--pr', S.panel ? `calc(var(--border) + var(--panel))` : 'var(--border)');
+    pg.classList.toggle('show', !!cur);
+    if (!cur) { lastPage = null; pageSig = ''; return; }
+    const sig = JSON.stringify([cur, S.settings, S.exts, S.ext_status, S.blocklist, S.about, cur === 'settings' ? S.blocked_total : 0]);
+    const ae = document.activeElement, typing = ae && pg.contains(ae) && ae.matches('input:not([type=range]):not([type=color])');
+    if (sig === pageSig || closeOpenDD || (typing && cur === lastPage && ae.id !== 'pgq')) return;
+    const scroller = pg.querySelector('.pg-scroll'), scroll = scroller ? scroller.scrollTop : 0;
+    const q = (pg.querySelector('#pgq') || {}).value || '', hadQ = ae && ae.id === 'pgq';
+    pageSig = sig;
+    const main = h('main', { class: 'pg-main' });
+    let side = '';
+    if (cur === 'settings') {
+      buildSettings(main);
+      side = h('aside', { class: 'pg-side' }, ...SECTIONS.map((s) => s ? h('button', { 'data-sec': s[0], onclick: () => {
+        const el = pg.querySelector('#sec-' + s[0]); if (el) pg.querySelector('.pg-scroll').scrollTo({ top: el.offsetTop - 120, behavior: S.settings.animations ? 'smooth' : 'auto' }); } },
+        icon(ICON[s[2]]), s[1]) : h('hr')));
+    } else buildExtensions(main);
+    const body = h('div', { class: 'pg-body' }, side || h('div'), main);
+    if (cur !== 'settings') body.style.gridTemplateColumns = 'minmax(0, 860px)';
+    if (!side) body.firstChild.remove();
+    const sc = h('div', { class: 'pg-scroll' }, pageTop(cur), body);
+    pg.replaceChildren(h('div', { class: 'pg-grid' }), sc);
+    // Recherche dans les paramètres
+    const qi = pg.querySelector('#pgq');
+    if (qi) {
+      const filter = () => {
+        const v = qi.value.trim().toLowerCase();
+        pg.querySelectorAll('.pg-sec').forEach((s) => {
+          let any = !v || s.querySelector('h4').textContent.toLowerCase().includes(v);
+          s.querySelectorAll('.pg-row').forEach((r) => { const m = !v || any || (r.dataset.k + ' ' + r.textContent).toLowerCase().includes(v); r.classList.toggle('hide', !m); if (m) any = true; });
+          s.classList.toggle('hide', !any);
+        });
+      };
+      qi.addEventListener('input', filter);
+      qi.value = q; if (q) filter();
+      if (hadQ) { qi.focus(); qi.setSelectionRange(q.length, q.length); }
+    }
+    // Section active dans la barre latérale
+    const spy = () => {
+      let curSec = null;
+      pg.querySelectorAll('.pg-sec').forEach((s) => { if (s.offsetTop - 140 <= sc.scrollTop) curSec = s.id.replace('sec-', ''); });
+      const map = { accent: 'apparence', apparence2: 'apparence' };
+      curSec = map[curSec] || curSec || 'apparence';
+      pg.querySelectorAll('.pg-side button').forEach((b) => b.classList.toggle('on', b.dataset.sec === curSec));
+    };
+    sc.addEventListener('scroll', spy, { passive: true });
+    if (cur === lastPage) { sc.style.scrollBehavior = 'auto'; sc.scrollTop = scroll; sc.style.scrollBehavior = ''; }
+    else if (S.settings.animations) { pg.classList.remove('anim'); void pg.offsetWidth; pg.classList.add('anim'); setTimeout(() => pg.classList.remove('anim'), 700); }
+    spy();
+    lastPage = cur;
+  }
+
+
   window.fx = {
     render(state) {
       S = state;
@@ -550,7 +877,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
       r.setProperty('--top', S.layout.top + 'px');
       r.setProperty('--border', S.layout.border + 'px');
       r.setProperty('--panel', S.layout.panel + 'px');
-      renderTabs(); renderBar(); renderPanel();
+      applyTheme();
+      renderTabs(); renderBar(); renderPanel(); renderPage();
     },
     focusUrl() { const u = $('#url'); u.focus(); u.select(); },
   };
@@ -568,6 +896,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
   const rl = $('#reload');
   rl.onclick = () => { rl.classList.remove('turn'); void rl.offsetWidth; rl.classList.add('turn'); send({ cmd: 'reload' }); };
   $('#home').onclick = () => send({ cmd: 'home' });
+  $('#settingsbtn').onclick = () => send({ cmd: 'open_page', name: 'settings' });
   $('#privbtn').onclick = () => send({ cmd: 'new_tab', private: true });
   $('#wsearch').onclick = () => fx.focusUrl();
   $('#wmin').onclick = () => send({ cmd: 'minimize' });

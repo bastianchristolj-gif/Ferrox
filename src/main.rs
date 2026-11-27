@@ -13,6 +13,7 @@
 
 mod blocker;
 mod config;
+mod extensions;
 mod monitor;
 
 use blocker::Blocker;
@@ -43,12 +44,28 @@ const TICK: Duration = Duration::from_secs(2);
 const UI_HTML: &str = include_str!("../ui/index.html");
 const HOME_HTML: &str = include_str!("../ui/home.html");
 const HOME_URL: &str = "ferrox://home";
+const SETTINGS_URL: &str = "ferrox://settings";
+const EXT_URL: &str = "ferrox://extensions";
+
+/// Pages internes dessinées par l'interface elle-même (aucune WebView web).
+fn internal_page(url: &str) -> Option<&'static str> {
+    match url {
+        SETTINGS_URL => Some("settings"),
+        EXT_URL => Some("extensions"),
+        _ => None,
+    }
+}
+
+fn valid_ext_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
+}
 
 // ---------------------------------------------------------------------------
 // Événements internes
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 enum UserEvent {
     Ui(String),
     Title(u64, String),
@@ -59,6 +76,10 @@ enum UserEvent {
     NavBlocked(u64, String),
     HttpBlocked(u64, String),
     Download(String, bool),
+    ExtDownloaded(Result<std::path::PathBuf, String>),
+    ExtAdded(Result<String, String>),
+    ExtList(Vec<(String, String, bool)>),
+    ExtChanged(Option<String>, bool),
 }
 
 /// Commandes envoyées par l'interface (JSON). Tout champ inattendu est rejeté.
@@ -84,6 +105,11 @@ enum UiCmd {
     Maximize,
     Quit,
     Resize { dir: String },
+    OpenPage { name: String },
+    ExtInstall { input: String },
+    ExtRemove { id: String },
+    ExtEnable { id: String, on: bool },
+    ExtOpen { id: String, page: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +155,9 @@ struct App {
     usage: monitor::Usage,
     blocked_total: u64,
     notice: Option<serde_json::Value>,
+    exts: Vec<extensions::ExtInfo>,
+    /// (en cours ?, message) affiché sur la page Extensions.
+    ext_status: Option<(bool, String)>,
 }
 
 fn main() {
@@ -230,6 +259,8 @@ fn main() {
         monitor: monitor::Monitor::new(),
         usage: Default::default(),
         blocked_total: 0,
+        exts: Vec::new(),
+        ext_status: None,
         notice: None,
     };
 
@@ -296,6 +327,7 @@ fn build(
         // désactive par défaut, et on coupe la télémétrie / les pings.
         builder
             .with_additional_browser_args(WEBVIEW2_ARGS)
+            .with_browser_extensions_enabled(true)
             .build_as_child(window)
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -360,6 +392,15 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
+fn tab_title(url: &str) -> String {
+    match url {
+        HOME_URL => "Nouvel onglet".into(),
+        SETTINGS_URL => "Paramètres".into(),
+        EXT_URL => "Extensions".into(),
+        _ => url.into(),
+    }
+}
+
 fn is_local_host(host: &str) -> bool {
     host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
 }
@@ -400,6 +441,9 @@ impl App {
         if s.is_empty() || s == HOME_URL {
             return HOME_URL.into();
         }
+        if internal_page(s).is_some() {
+            return s.into();
+        }
         let lower = s.to_ascii_lowercase();
         if lower.starts_with("https://") {
             return s.into();
@@ -426,7 +470,17 @@ impl App {
     fn home_html(&self) -> String {
         // accent validé (#rrggbb) et URL de recherche encodée en JSON : pas d'injection.
         let search = serde_json::to_string(&self.settings.search_url).unwrap_or_else(|_| "\"\"".into());
-        HOME_HTML.replace("__ACCENT__", &self.settings.accent).replace("__SEARCH__", &search)
+        let mut classes = Vec::new();
+        if !self.settings.animations {
+            classes.push("noanim");
+        }
+        if !self.settings.wallpaper {
+            classes.push("nowall");
+        }
+        HOME_HTML
+            .replace("__ACCENT__", &self.settings.accent)
+            .replace("__SEARCH__", &search)
+            .replace("__BODY__", &classes.join(" "))
     }
 
     fn new_tab(&mut self, url: String, private: bool) {
@@ -434,7 +488,7 @@ impl App {
         self.next_id += 1;
         self.tabs.push(Tab {
             id,
-            title: if url == HOME_URL { "Nouvel onglet".into() } else { url.clone() },
+            title: tab_title(&url),
             url,
             wv: None,
             last_active: Instant::now(),
@@ -450,6 +504,9 @@ impl App {
             let t = &self.tabs[idx];
             (t.id, t.url.clone(), t.private)
         };
+        if internal_page(&url).is_some() {
+            return;
+        }
         let sh = self.shared.clone();
         let p = self.proxy.clone();
         let rect = self.content_rect();
@@ -473,6 +530,10 @@ impl App {
             move |url: String| -> bool {
                 let lower = url.to_ascii_lowercase();
                 if lower.starts_with("about:") || lower.starts_with("blob:") || lower.starts_with("data:") {
+                    return true;
+                }
+                // Pages des extensions (popup, options) : Windows uniquement.
+                if extensions::SUPPORTED && lower.starts_with("chrome-extension://") {
                     return true;
                 }
                 if !(lower.starts_with("https://") || lower.starts_with("http://")) {
@@ -515,7 +576,8 @@ impl App {
                 let (sh, p) = (sh.clone(), p.clone());
                 move |url, _| {
                     let lower = url.to_ascii_lowercase();
-                    let ok = (lower.starts_with("https://") || lower.starts_with("http://"))
+                    let ok = (lower.starts_with("https://") || lower.starts_with("http://")
+                        || (extensions::SUPPORTED && lower.starts_with("chrome-extension://")))
                         && !(sh.adblock.load(Ordering::Relaxed) && sh.blocker.is_blocked_url(&url));
                     if ok {
                         let _ = p.send_event(UserEvent::OpenTab(url));
@@ -620,8 +682,9 @@ impl App {
         let tab = self.tabs.remove(idx);
         drop(tab.wv); // détruit la WebView et libère la mémoire
         if self.tabs.is_empty() {
-            self.new_tab(HOME_URL.into(), false);
-            return;
+            // Dernier onglet fermé → on quitte le navigateur.
+            self.settings.save();
+            std::process::exit(0);
         }
         if self.active == Some(id) {
             let ni = idx.min(self.tabs.len() - 1);
@@ -691,11 +754,12 @@ impl App {
     fn navigate_active(&mut self, url: String) {
         let Some(i) = self.active_idx() else { return };
         self.notice = None;
-        if url == HOME_URL {
-            // Recrée la vue sur la page d'accueil.
+        if url == HOME_URL || internal_page(&url).is_some() {
+            // Recrée la vue (page d'accueil) ou bascule sur une page interne.
             self.tabs[i].wv = None;
+            self.tabs[i].title = tab_title(&url);
             self.tabs[i].url = url;
-            self.tabs[i].title = "Nouvel onglet".into();
+            self.tabs[i].loading = false;
             let id = self.tabs[i].id;
             self.switch(id);
             return;
@@ -768,6 +832,42 @@ impl App {
                     self.push_state();
                 }
             }
+            UserEvent::ExtDownloaded(res) => match res {
+                Ok(path) => self.ext_add(path),
+                Err(e) => self.ext_set_status(false, e),
+            },
+            UserEvent::ExtAdded(res) => {
+                match res {
+                    Ok(name) => self.ext_set_status(false, format!("« {name} » installée ✔")),
+                    Err(e) => self.ext_set_status(false, e),
+                }
+                self.ext_refresh();
+            }
+            UserEvent::ExtList(list) => {
+                self.exts = list
+                    .into_iter()
+                    .map(|(id, name, enabled)| {
+                        let mut info = extensions::info_from_disk(&id).unwrap_or_default();
+                        info.id = id;
+                        if info.name.is_empty() || info.name.starts_with("__MSG_") {
+                            info.name = name;
+                        }
+                        info.enabled = enabled;
+                        info
+                    })
+                    .collect();
+                self.exts.sort_by_key(|e| e.name.to_lowercase());
+                self.push_state();
+            }
+            UserEvent::ExtChanged(removed, ok) => {
+                if let Some(id) = removed.filter(|id| ok && valid_ext_id(id)) {
+                    let _ = std::fs::remove_dir_all(extensions::ext_dir().join(&id));
+                    self.ext_set_status(false, "Extension supprimée".into());
+                } else if !ok {
+                    self.ext_set_status(false, "L'opération a échoué".into());
+                }
+                self.ext_refresh();
+            }
             UserEvent::Download(url, done) => {
                 let kind = if done { "download_done" } else { "download" };
                 self.notice = Some(serde_json::json!({"kind": kind, "url": url}));
@@ -807,7 +907,10 @@ impl App {
 
     fn on_ui(&mut self, cmd: UiCmd) {
         match cmd {
-            UiCmd::Ready => self.push_state(),
+            UiCmd::Ready => {
+                self.push_state();
+                self.ext_refresh();
+            }
             UiCmd::Navigate { input } => {
                 let url = self.resolve_input(&input);
                 self.navigate_active(url);
@@ -840,7 +943,7 @@ impl App {
             }
             UiCmd::Home => self.navigate_active(self.resolve_input(&self.settings.home_url.clone())),
             UiCmd::Panel { name } => {
-                let name = name.filter(|n| matches!(n.as_str(), "control" | "shield" | "settings"));
+                let name = name.filter(|n| matches!(n.as_str(), "control" | "shield" | "extensions"));
                 self.panel = if self.panel == name { None } else { name };
                 self.layout();
                 self.push_state();
@@ -886,15 +989,114 @@ impl App {
                 };
                 let _ = self.window.drag_resize_window(d);
             }
-            UiCmd::ClearData => {
-                for t in &self.tabs {
-                    if let Some(wv) = &t.wv {
-                        let _ = wv.clear_all_browsing_data();
-                        break; // le contexte est partagé
-                    }
+            UiCmd::OpenPage { name } => {
+                let url = match name.as_str() {
+                    "settings" => SETTINGS_URL,
+                    "extensions" => EXT_URL,
+                    _ => return,
+                };
+                if let Some(t) = self.tabs.iter().find(|t| t.url == url) {
+                    let id = t.id;
+                    self.switch(id);
+                } else {
+                    self.new_tab(url.into(), false);
                 }
+                if name == "extensions" {
+                    self.ext_refresh();
+                }
+            }
+            UiCmd::ExtInstall { input } => self.ext_install(&input),
+            UiCmd::ExtRemove { id } => self.ext_remove(id),
+            UiCmd::ExtEnable { id, on } => self.ext_enable(id, on),
+            UiCmd::ExtOpen { id, page } => {
+                // La page à ouvrir vient du manifeste lu sur le disque, jamais de l'interface.
+                let target = self.exts.iter().find(|e| e.id == id).and_then(|e| match page.as_str() {
+                    "popup" => e.popup.clone(),
+                    "options" => e.options.clone(),
+                    _ => None,
+                });
+                if let Some(rel) = target {
+                    self.new_tab(format!("chrome-extension://{id}/{rel}"), false);
+                }
+            }
+            UiCmd::ClearData => {
+                // Le contexte (profil) est partagé par toutes les vues.
+                let _ = self.ui.clear_all_browsing_data();
                 self.notice = Some(serde_json::json!({"kind": "cleared", "url": ""}));
                 self.push_state();
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- extensions
+    fn ext_set_status(&mut self, busy: bool, msg: String) {
+        self.ext_status = Some((busy, msg));
+        self.push_state();
+    }
+
+    fn ext_refresh(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            let p = self.proxy.clone();
+            if let Err(e) = extensions::wv2::list(&self.ui, move |l| {
+                let _ = p.send_event(UserEvent::ExtList(l));
+            }) {
+                self.ext_status = Some((false, e));
+            }
+        }
+    }
+
+    fn ext_install(&mut self, input: &str) {
+        if !extensions::SUPPORTED {
+            return self.ext_set_status(false, "Les extensions Chrome ne sont prises en charge que sous Windows (WebView2).".into());
+        }
+        let Some(id) = extensions::parse_store_id(input) else {
+            return self.ext_set_status(false, "Lien ou ID invalide. Collez l'adresse de la page de l'extension sur le Chrome Web Store.".into());
+        };
+        self.ext_set_status(true, "Téléchargement depuis le Chrome Web Store…".into());
+        let p = self.proxy.clone();
+        std::thread::spawn(move || {
+            let _ = p.send_event(UserEvent::ExtDownloaded(extensions::download_and_unpack(&id)));
+        });
+    }
+
+    fn ext_add(&mut self, path: std::path::PathBuf) {
+        let _ = &path;
+        #[cfg(target_os = "windows")]
+        {
+            self.ext_set_status(true, "Installation…".into());
+            let p = self.proxy.clone();
+            if let Err(e) = extensions::wv2::add(&self.ui, &path, move |r| {
+                let _ = p.send_event(UserEvent::ExtAdded(r));
+            }) {
+                self.ext_set_status(false, e);
+            }
+        }
+    }
+
+    fn ext_remove(&mut self, id: String) {
+        let _ = &id;
+        #[cfg(target_os = "windows")]
+        {
+            let p = self.proxy.clone();
+            let id2 = id.clone();
+            if let Err(e) = extensions::wv2::remove(&self.ui, id, move |ok| {
+                let _ = p.send_event(UserEvent::ExtChanged(Some(id2), ok));
+            }) {
+                self.ext_set_status(false, e);
+            }
+        }
+    }
+
+    fn ext_enable(&mut self, id: String, on: bool) {
+        let _ = (&id, on);
+        #[cfg(target_os = "windows")]
+        {
+            let p = self.proxy.clone();
+            if let Err(e) = extensions::wv2::enable(&self.ui, id, on, move |ok| {
+                let _ = p.send_event(UserEvent::ExtChanged(None, ok));
+            }) {
+                self.ext_set_status(false, e);
             }
         }
     }
@@ -913,10 +1115,11 @@ impl App {
                 serde_json::json!({
                     "id": t.id,
                     "title": t.title,
-                    "url": if t.url == HOME_URL { "" } else { t.url.as_str() },
+                    "url": if t.url == HOME_URL || internal_page(&t.url).is_some() { "" } else { t.url.as_str() },
+                    "page": internal_page(&t.url),
                     "active": Some(t.id) == self.active,
                     "loading": t.loading,
-                    "sleeping": t.wv.is_none(),
+                    "sleeping": t.wv.is_none() && internal_page(&t.url).is_none(),
                     "private": t.private,
                     "blocked": t.blocked,
                 })
@@ -932,6 +1135,15 @@ impl App {
             "notice": self.notice,
             "layout": {"top": TOP_H, "border": if self.window.is_maximized() { 0 } else { BORDER }, "panel": PANEL_W},
             "maximized": self.window.is_maximized(),
+            "exts": self.exts,
+            "ext_supported": extensions::SUPPORTED,
+            "ext_status": self.ext_status.as_ref().map(|(busy, msg)| serde_json::json!({"busy": busy, "msg": msg})),
+            "about": {
+                "version": env!("CARGO_PKG_VERSION"),
+                "engine": if cfg!(target_os = "windows") { "Microsoft Edge WebView2" } else if cfg!(target_os = "macos") { "WebKit (WKWebView)" } else { "WebKitGTK" },
+                "downloads": dirs::download_dir().map(|d| d.display().to_string()).unwrap_or_default(),
+                "config": config::config_dir().display().to_string(),
+            },
         });
         // serde_json produit un littéral JS sûr : aucune injection possible.
         let _ = self.ui.evaluate_script(&format!("window.fx && fx.render({state})"));

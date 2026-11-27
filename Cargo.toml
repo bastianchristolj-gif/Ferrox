@@ -6,15 +6,22 @@ description = "Ferrox — navigateur web gaming léger et sécurisé, écrit en 
 license = "MIT"
 
 [dependencies]
+base64 = "0.23.1"
 dirs = "7.0.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.11.2"
 sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 tao = "0.38.0"
+ureq = { version = "3.5.2", features = ["platform-verifier"] }
 wry = "0.58.2"
+zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation"] }
+windows-core = "0.62"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.19"
