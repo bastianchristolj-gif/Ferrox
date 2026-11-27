@@ -16,6 +16,28 @@ pub struct Settings {
     pub wallpaper: bool,
     /// Affiche la RAM utilisée dans la barre d'outils.
     pub show_ram: bool,
+    // --- Onglets / démarrage ---
+    /// Rouvre les onglets de la session précédente au démarrage.
+    pub restore_session: bool,
+    /// Fermer le dernier onglet quitte le navigateur.
+    pub quit_on_last_tab: bool,
+    /// Les nouveaux onglets s'ouvrent à côté de l'onglet actif.
+    pub new_tab_next: bool,
+    /// Zoom par défaut des pages (en %).
+    pub default_zoom: u32,
+
+    // --- Contenu / système ---
+    /// Autorise la lecture automatique des vidéos avec le son.
+    pub allow_autoplay: bool,
+    /// Accélération matérielle (GPU).
+    pub hardware_accel: bool,
+    /// Dossier de téléchargement ("" = dossier système).
+    pub download_dir: String,
+
+    // --- Saisie automatique ---
+    pub autofill: bool,
+    pub save_passwords: bool,
+
     /// Moteur de recherche ; `{}` est remplacé par la requête encodée.
     pub search_url: String,
     pub home_url: String,
@@ -26,6 +48,12 @@ pub struct Settings {
     pub block_permissions: bool,
     /// Désactive WebGL / WebAudio (réduit l'empreinte numérique).
     pub anti_fingerprint: bool,
+    /// Envoie les signaux Do-Not-Track / Global Privacy Control.
+    pub send_dnt: bool,
+    /// Efface cookies et données de navigation à la fermeture.
+    pub clear_on_exit: bool,
+    /// Ferrox a déjà proposé uBlock Origin Lite (installation automatique au 1er lancement).
+    pub ubo_offered: bool,
 
     // --- "Control" : limiteurs de ressources ---
     /// Limite de RAM (Mo) — au-delà, les onglets en arrière-plan sont mis en veille.
@@ -45,12 +73,24 @@ impl Default for Settings {
             animations: true,
             wallpaper: true,
             show_ram: true,
+            restore_session: false,
+            quit_on_last_tab: true,
+            new_tab_next: true,
+            default_zoom: 100,
+            allow_autoplay: false,
+            hardware_accel: true,
+            download_dir: String::new(),
+            autofill: true,
+            save_passwords: true,
             search_url: "https://duckduckgo.com/?q={}".into(),
             home_url: "ferrox://home".into(),
             adblock: true,
             https_only: true,
             block_permissions: true,
             anti_fingerprint: false,
+            send_dnt: true,
+            clear_on_exit: false,
+            ubo_offered: false,
             ram_limit_mb: 1536,
             ram_limiter: true,
             max_live_tabs: 6,
@@ -119,9 +159,46 @@ impl Settings {
         if !(self.home_url.starts_with("https://") || self.home_url == "ferrox://home") {
             self.home_url = d.home_url.clone();
         }
+        self.default_zoom = self.default_zoom.clamp(50, 250);
+        if !self.download_dir.is_empty() && !std::path::Path::new(&self.download_dir).is_dir() {
+            self.download_dir.clear();
+        }
         self.ram_limit_mb = self.ram_limit_mb.clamp(256, 32_768);
         self.max_live_tabs = self.max_live_tabs.clamp(1, 50);
         self.hibernate_after_min = self.hibernate_after_min.min(240);
         self
+    }
+}
+
+// ------------------------------------------------------------------ session
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Session {
+    pub tabs: Vec<String>,
+    pub active: usize,
+}
+
+fn session_path() -> PathBuf {
+    config_dir().join("session.json")
+}
+
+impl Session {
+    pub fn load() -> Self {
+        std::fs::read_to_string(session_path())
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self) {
+        let dir = config_dir();
+        if std::fs::create_dir_all(&dir).is_ok() {
+            if let Ok(json) = serde_json::to_string(self) {
+                let tmp = dir.join("session.json.tmp");
+                if std::fs::write(&tmp, json).is_ok() {
+                    let _ = std::fs::rename(&tmp, session_path());
+                }
+            }
+        }
     }
 }

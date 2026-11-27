@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: https:">
 <title>Ferrox</title>
 <style>
 :root {
@@ -250,8 +250,8 @@ body.noram #ram { display: none; }
   -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 55%, #000 100%); mask-image: linear-gradient(180deg, transparent, #000 55%); }
 .pg-scroll { position: absolute; inset: 0; overflow-y: auto; scroll-behavior: smooth; }
 .pg-scroll::-webkit-scrollbar { width: 10px; } .pg-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; border: 3px solid transparent; background-clip: padding-box; }
-.pg-top { display: flex; justify-content: center; align-items: center; gap: 36px; padding: 18px 20px 10px; position: sticky; top: 0; z-index: 4;
-  background: linear-gradient(var(--page-bg) 70%, transparent); }
+.pg-top { display: flex; justify-content: center; align-items: center; gap: 36px; height: 76px; padding: 0 20px; position: sticky; top: 0; z-index: 4;
+  background: var(--page-bg); }
 .pg-top button { font-size: 14px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--dim); position: relative; padding: 4px 2px;
   transition: color .2s, font-size .25s var(--ease), letter-spacing .25s; }
 .pg-top button:hover { color: var(--text); }
@@ -269,7 +269,7 @@ body.noram #ram { display: none; }
 .pg-side button.on { color: var(--text); background: color-mix(in srgb, var(--accent) 14%, var(--card)); box-shadow: inset 3px 0 0 var(--accent); }
 .pg-side button.on svg { color: var(--accent); }
 .pg-side hr { border: 0; height: 1px; background: var(--line); margin: 6px 4px; }
-.pg-search { position: sticky; top: 76px; z-index: 3; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px; margin-bottom: 8px;
+.pg-search { position: sticky; top: 76px; z-index: 3; outline: 10px solid var(--page-bg); display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px; margin-bottom: 8px;
   background: var(--field); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px -12px #000; transition: border-color .2s, box-shadow .2s; }
 .pg-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 8px 24px -12px #000; }
 .pg-search svg { color: var(--dim); }
@@ -338,6 +338,37 @@ body.noram #ram { display: none; }
 .pext button.n { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; transition: color .15s; }
 .pext button.n:hover { color: var(--accent); }
 
+/* ---------- Correctifs d'interface ---------- */
+.tab { container-type: inline-size; }
+@container (max-width: 74px) { .tab .t { display: none; } .tab:not(.active) .x { display: none; } }
+.tab .ic img { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; animation: fadeIn .25s; }
+#loadbar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; opacity: 0; transition: opacity .3s; pointer-events: none; }
+#loadbar.on { opacity: 1; }
+#loadbar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 35%; border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent); box-shadow: 0 0 8px var(--accent); animation: lb 1.1s var(--ease) infinite; }
+#loadbar:not(.on)::after { animation: none; }
+@keyframes lb { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+#bar { position: relative; }
+.nb.dis { color: #4a4a52; pointer-events: none; }
+#zoomb { display: none; height: 22px; padding: 0 7px; border-radius: 5px; font-size: 11px; font-weight: 600; color: var(--text); background: var(--hover);
+  font-variant-numeric: tabular-nums; flex: none; transition: background .2s; }
+#zoomb.show { display: inline-flex; align-items: center; animation: pop .3s var(--spring); }
+#zoomb:hover { background: var(--accent); color: var(--on-accent); }
+#urlview .fx { color: var(--accent); font-weight: 600; }
+#lock.int { color: var(--accent); }
+.restart { display: flex; align-items: center; gap: 14px; padding: 12px 16px; margin-top: 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); animation: fadeUp .4s var(--ease); }
+.restart span { flex: 1; font-size: 12.5px; }
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; padding: 12px 0; }
+.rec { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--field); border: 1px solid var(--line);
+  transition: border-color .2s, transform .3s var(--spring); }
+.rec:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); transform: translateY(-2px); }
+.rec .lt { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 900; font-size: 15px; color: #fff; flex: none; }
+.rec .nm { flex: 1; min-width: 0; } .rec .nm b { display: block; font-size: 12.5px; } .rec .nm small { color: var(--dim); font-size: 11px; }
+.rec .btn2 { height: 28px; padding: 0 12px; font-size: 11.5px; }
+.rec .ok { font-size: 11px; color: #3ddc97; font-weight: 600; }
+.tag { font-size: 9.5px; font-weight: 700; letter-spacing: .5px; padding: 2px 6px; border-radius: 4px; background: var(--accent); color: var(--on-accent); margin-left: 6px; vertical-align: 1px; }
+
 #bg { position: fixed; left: var(--border); top: var(--top); right: var(--border); bottom: var(--border); background: #18181b; }
 
 </style>
@@ -365,12 +396,14 @@ body.noram #ram { display: none; }
   </div>
 
   <div id="bar">
+    <div id="loadbar"></div>
     <button class="nb acc" id="back" title="Précédent"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
     <button class="nb" id="fwd" title="Suivant"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     <button class="nb" id="reload" title="Recharger (Ctrl+R)"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9L20 8.5"/><path d="M20 3.5v5h-5"/></svg></button>
     <div id="urlbox">
       <span id="lock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
       <div class="urlwrap"><span id="urlview"></span><input id="url" spellcheck="false" autocomplete="off" placeholder="Rechercher ou saisir une adresse"></div>
+      <button id="zoomb" title="Zoom (cliquer pour revenir à 100 %)"></button>
     </div>
     <div id="notice"><span id="noticetxt"></span><button id="noticeact"></button><button id="noticex">✕</button></div>
     <div id="tools">
@@ -422,6 +455,11 @@ body.noram #ram { display: none; }
     info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
     store: 'M4 8h16l-1 12H5zM8 8V6a4 4 0 0 1 8 0v2',
     trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+    tabs: 'M3 7h7l2-3h9v16H3zM3 7v13',
+    key: 'M15 7a4 4 0 1 1-3.9 4.9L4 19v2h3v-2h2v-2h2l1.1-1.1A4 4 0 0 1 15 7zM16 10h.01',
+    play: 'M5 4l14 8-14 8z',
+    cpu: 'M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2M7 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM9 9h6v6H9z',
+    reset: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
   };
 
   let S = null, editingUrl = false;
@@ -446,11 +484,18 @@ body.noram #ram { display: none; }
     el.classList.toggle('private', t.private);
     el.title = t.title + (t.sleeping ? ' (en veille)' : '');
     el.children[1].textContent = t.title || 'Sans titre';
-    const key = t.page === 'settings' ? 'gear' : t.page === 'extensions' ? 'puzzle' : t.loading ? 'load' : t.sleeping ? 'moon' : t.private ? 'eye' : 'globe';
+    const key = t.page === 'settings' ? 'gear' : t.page === 'extensions' ? 'puzzle' : t.loading ? 'load' : t.sleeping ? 'moon' : t.private ? 'eye' : t.favicon ? 'fav:' + t.favicon : 'globe';
     if (el._ic !== key) {
       el._ic = key;
       el.children[0].classList.toggle('pg', !!t.page);
-      el.children[0].replaceChildren(key === 'load' ? h('span', { class: 'spin' }) : icon(ICON[key]));
+      let node;
+      if (key === 'load') node = h('span', { class: 'spin' });
+      else if (key.startsWith('fav:')) {
+        node = h('img', { alt: '', referrerpolicy: 'no-referrer' });
+        node.addEventListener('error', () => node.replaceWith(icon(ICON.globe)), { once: true });
+        node.src = t.favicon;
+      } else node = icon(ICON[key]);
+      el.children[0].replaceChildren(node);
     }
   }
   const glider = h('div', { id: 'glider' });
@@ -514,6 +559,7 @@ body.noram #ram { display: none; }
   function renderUrlView(u) {
     const v = $('#urlview'); v.replaceChildren();
     if (!u) return;
+    if (u.startsWith('ferrox://')) { v.append(h('span', { class: 'fx' }, 'ferrox://'), h('span', {}, u.slice(9))); return; }
     try {
       const x = new URL(u);
       v.append(h('span', {}, x.host), h('span', { class: 'p' }, (x.pathname === '/' ? '' : x.pathname) + x.search));
@@ -526,7 +572,9 @@ body.noram #ram { display: none; }
     renderUrlView(editingUrl ? '' : t.url);
     $('.urlwrap').classList.toggle('show-view', !editingUrl && !!t.url);
     const lock = $('#lock');
-    lock.classList.toggle('insecure', !!t.url && !t.url.startsWith('https://'));
+    const internal = !!t.url && t.url.startsWith('ferrox://');
+    lock.classList.toggle('int', internal);
+    lock.classList.toggle('insecure', !!t.url && !internal && !t.url.startsWith('https://') && !t.url.startsWith('chrome-extension://'));
     lock.style.opacity = t.url ? 1 : .35;
     lock.title = t.url && t.url.startsWith('https://') ? 'Connexion chiffrée (HTTPS)' : 'Connexion non chiffrée';
     const pb = $('#pageblocked'), nbk = t.blocked || 0;
@@ -534,6 +582,19 @@ body.noram #ram { display: none; }
     if (nbk !== lastBlocked && nbk) { pb.classList.remove('pop'); void pb.offsetWidth; pb.classList.add('pop'); }
     lastBlocked = nbk;
     $('#miniram').textContent = S.usage.ram || '–';
+    $('#loadbar').classList.toggle('on', !!t.loading);
+    $('#back').classList.toggle('dis', !t.can_back);
+    $('#fwd').classList.toggle('dis', !t.can_fwd);
+    const zb = $('#zoomb'), z = t.zoom || 100;
+    zb.classList.toggle('show', z !== 100); zb.textContent = z + ' %';
+    const wm = $('#wmax');
+    if (wm._m !== !!S.maximized) {
+      wm._m = !!S.maximized;
+      wm.title = S.maximized ? 'Restaurer' : 'Agrandir';
+      wm.innerHTML = S.maximized
+        ? '<svg viewBox="0 0 24 24"><rect x="4" y="8" width="12" height="12" rx="1.5"/><path d="M8 8V5.5A1.5 1.5 0 0 1 9.5 4H18.5A1.5 1.5 0 0 1 20 5.5V14.5A1.5 1.5 0 0 1 18.5 16H16"/></svg>'
+        : '<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>';
+    }
     document.body.classList.toggle('max', !!S.maximized);
     const n = S.notice, nb = $('#notice');
     const nkey = n ? n.kind + n.url : '';
@@ -717,7 +778,7 @@ body.noram #ram { display: none; }
     } else {
       const c = h('div', { class: 'card' });
       for (const e of S.exts) c.append(h('div', { class: 'pext' }, extIcon(e),
-        h('button', { class: 'n', title: e.popup ? 'Ouvrir' : e.name, onclick: () => e.popup && send({ cmd: 'ext_open', id: e.id, page: 'popup' }) }, e.name),
+        h('button', { class: 'n', title: e.popup ? 'Ouvrir la fenêtre de l\'extension' : e.name, onclick: () => e.popup ? send({ cmd: 'ext_open', id: e.id, page: 'popup' }) : (e.options && send({ cmd: 'ext_open', id: e.id, page: 'options' })) }, e.name),
         h('button', { class: 'toggle' + (e.enabled ? ' on' : ''), title: e.enabled ? 'Désactiver' : 'Activer',
           onclick: (ev) => { ev.currentTarget.classList.toggle('on'); send({ cmd: 'ext_enable', id: e.id, on: !e.enabled }); } })));
       p.append(c);
@@ -746,8 +807,17 @@ body.noram #ram { display: none; }
   const SECTIONS = [
     ['apparence', 'Apparence', 'brush'], ['recherche', 'Moteur de recherche', 'search'], ['demarrage', 'Au démarrage', 'power'], null,
     ['vie-privee', 'Confidentialité et sécurité', 'shield'], ['control', 'Performances (Control)', 'chip'], ['ext', 'Extensions', 'puzzle'], null,
-    ['telechargements', 'Téléchargements', 'down'], ['raccourcis', 'Raccourcis clavier', 'keys'], ['apropos', 'À propos de Ferrox', 'info'],
+    ['onglets', 'Onglets', 'tabs'], ['saisie', 'Saisie auto. et mots de passe', 'key'], ['contenu', 'Contenu des sites', 'play'], null,
+    ['telechargements', 'Téléchargements', 'down'], ['systeme', 'Système', 'cpu'], ['raccourcis', 'Raccourcis clavier', 'keys'], ['reset', 'Réinitialiser', 'reset'], ['apropos', 'À propos de Ferrox', 'info'],
   ];
+
+  function resetBtn() {
+    let armed = false;
+    const b = h('button', { class: 'btn2 danger', onclick: () => {
+      if (!armed) { armed = true; b.textContent = 'Confirmer ?'; setTimeout(() => { armed = false; if (b.isConnected) b.textContent = 'Réinitialiser'; }, 3000); return; }
+      send({ cmd: 'reset_settings' }); } }, 'Réinitialiser');
+    return b;
+  }
 
   function buildSettings(main) {
     const sec = (id, title, ...cards) => h('section', { class: 'pg-sec', id: 'sec-' + id }, h('h4', {}, title), ...cards);
@@ -785,7 +855,15 @@ body.noram #ram { display: none; }
     const custom = h('input', { class: 'txt', placeholder: 'https://…', style: 'width:230px' });
     custom.addEventListener('change', () => { let v = custom.value.trim(); if (!v) return; if (!/^https:\/\//i.test(v)) v = 'https://' + v.replace(/^http:\/\//i, ''); setS({ home_url: v }); });
 
-    const shortcuts = [['Ctrl+T', 'Nouvel onglet'], ['Ctrl+Maj+N', 'Onglet privé'], ['Ctrl+W', 'Fermer l\'onglet'], ['Ctrl+L', 'Barre d\'adresse'], ['Ctrl+R', 'Recharger'], ['Ctrl+Tab', 'Onglet suivant'], ['Ctrl+Maj+Tab', 'Onglet précédent'], ['Clic molette', 'Fermer un onglet']];
+    const shortcuts = [['Ctrl+T', 'Nouvel onglet'], ['Ctrl+Maj+N', 'Onglet privé'], ['Ctrl+W', 'Fermer l\'onglet'], ['Ctrl+Maj+T', 'Rouvrir l\'onglet fermé'],
+      ['Ctrl+Tab / Ctrl+Maj+Tab', 'Onglet suivant / précédent'], ['Ctrl+1 … 9', 'Aller à l\'onglet n (9 = dernier)'], ['Ctrl+L', 'Barre d\'adresse'],
+      ['Ctrl+R / F5', 'Recharger'], ['Alt+← / Alt+→', 'Précédent / Suivant'], ['Ctrl+ + / - / 0', 'Zoom avant / arrière / 100 %'], ['F11', 'Plein écran'],
+      ['Échap', 'Quitter le plein écran, fermer un menu'], ['Clic molette', 'Fermer un onglet']];
+    const dlInput = h('input', { class: 'txt', placeholder: S.about.downloads || 'Dossier système', style: 'width:260px' });
+    dlInput.value = S.settings.download_dir;
+    dlInput.addEventListener('change', () => setS({ download_dir: dlInput.value.trim() }));
+    const zoomDd = dropdown([50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200].map((z) => ({ label: z + ' %', hint: z === 100 ? 'par défaut' : '', value: z })), S.settings.default_zoom, (v) => setS({ default_zoom: v }));
+    const restartWin = S.ext_supported ? 'Nécessite un redémarrage de Ferrox.' : '';
 
     main.append(
       h('label', { class: 'pg-search' }, icon(ICON.search), h('input', { id: 'pgq', placeholder: 'Rechercher un paramètre', spellcheck: 'false' })),
@@ -799,24 +877,43 @@ body.noram #ram { display: none; }
         row('Moteur utilisé dans la barre d\'adresse', 'Les moteurs « privés » ne vous pistent pas.', dropdown(engines, S.settings.search_url, (v) => setS({ search_url: v })), 'search'))),
       sec('demarrage', 'Au démarrage et page d\'accueil', h('div', { class: 'pg-card' },
         row('Page d\'accueil', 'Ouverte par le bouton Accueil et au démarrage.', dropdown(homes, S.settings.home_url, (v) => setS({ home_url: v })), 'home'),
-        row('Adresse personnalisée', 'Uniquement en HTTPS.', custom, 'home url'))),
+        row('Adresse personnalisée', 'Uniquement en HTTPS.', custom, 'home url'),
+        row('Reprendre là où je m\'étais arrêté', 'Rouvre les onglets de la session précédente (chargés seulement quand vous les ouvrez).', tgl('restore_session'), 'session restaurer'))),
       sec('vie-privee', 'Confidentialité et sécurité', h('div', { class: 'pg-card' },
         row('Bloqueur de publicités et de traqueurs', S.blocklist.toLocaleString('fr-FR') + ' domaines en liste · ' + S.blocked_total.toLocaleString('fr-FR') + ' bloqués cette session.', tgl('adblock'), 'pub adblock'),
         row('Mode HTTPS uniquement', 'Bloque les connexions non chiffrées (vous pouvez autoriser un site).', tgl('https_only'), 'http'),
         row('Bloquer caméra, micro et position', 'Refuse automatiquement ces permissions aux sites.', tgl('block_permissions'), 'permissions'),
         row('Anti-empreinte strict', 'Désactive WebGL et WebAudio (certains jeux web peuvent ne plus marcher).', tgl('anti_fingerprint'), 'fingerprint'),
+        row('Envoyer « Ne pas me pister »', 'Signaux Do-Not-Track et Global Privacy Control envoyés aux sites.', tgl('send_dnt'), 'dnt gpc'),
+        row('Effacer les données à la fermeture', 'Cookies, cache et stockage supprimés quand vous quittez Ferrox.', tgl('clear_on_exit'), 'cookies quitter'),
         row('Effacer les données de navigation', 'Cookies, cache et stockage de tous les sites.', h('button', { class: 'btn2 danger', onclick: () => send({ cmd: 'clear_data' }) }, 'Effacer'), 'cookies cache'))),
       sec('control', 'Performances (Control)', h('div', { class: 'pg-card' },
         row('Limiteur de RAM', 'Met en veille les onglets en arrière-plan au-delà de la limite.', tgl('ram_limiter'), 'ram memoire'),
         row('Limite de RAM', '', rng('ram_limit_mb', 256, 8192, 128, (v) => v + ' Mo'), 'ram'),
         row('Onglets actifs maximum', 'Les plus anciens sont mis en veille.', rng('max_live_tabs', 1, 20, 1, (v) => v), 'onglets'),
         row('Mise en veille après inactivité', '', rng('hibernate_after_min', 0, 60, 1, (v) => v ? v + ' min' : 'jamais'), 'veille'))),
+      sec('onglets', 'Onglets', h('div', { class: 'pg-card' },
+        row('Ouvrir les nouveaux onglets à côté de l\'onglet actif', '', tgl('new_tab_next'), 'position'),
+        row('Fermer Ferrox avec le dernier onglet', 'Sinon, un onglet vide est ouvert.', tgl('quit_on_last_tab'), 'quitter'),
+        row('Zoom par défaut des pages', 'Ctrl + molette ou Ctrl +/- pour un onglet.', zoomDd, 'zoom'))),
+      sec('saisie', 'Saisie automatique et mots de passe', h('div', { class: 'pg-card' },
+        row('Saisie automatique des formulaires', 'Propose les adresses, noms… déjà saisis.', tgl('autofill'), 'formulaire autofill'),
+        row('Proposer d\'enregistrer les mots de passe', S.ext_supported ? 'Stockés chiffrés dans votre profil Windows.' : 'Windows uniquement.', tgl('save_passwords'), 'password mdp'))),
+      sec('contenu', 'Contenu des sites', h('div', { class: 'pg-card' },
+        row('Lecture automatique des vidéos avec le son', 'Désactivé : les vidéos attendent un clic. ' + restartWin, tgl('allow_autoplay'), 'autoplay video'))),
       sec('ext', 'Extensions', h('div', { class: 'pg-card' },
         row('Gérer les extensions', S.ext_supported ? S.exts.length + ' installée(s) · Chrome Web Store compatible' : 'Disponible sous Windows (WebView2)',
           h('button', { class: 'btn2 ghost', onclick: () => send({ cmd: 'open_page', name: 'extensions' }) }, 'Ouvrir'), 'addons'))),
       sec('telechargements', 'Téléchargements', h('div', { class: 'pg-card' },
-        row('Dossier de téléchargement', '', h('span', { class: 'mono' }, S.about.downloads || '—'), 'download'))),
+        row('Dossier de téléchargement', 'Laissez vide pour le dossier Téléchargements du système.', dlInput, 'download dossier'),
+        row('Ouvrir le dossier de téléchargement', '', h('button', { class: 'btn2 ghost', onclick: () => send({ cmd: 'open_downloads' }) }, 'Ouvrir'), 'download'))),
+      sec('systeme', 'Système', h('div', { class: 'pg-card' },
+        row('Accélération matérielle', 'Utilise la carte graphique pour l\'affichage (recommandé). ' + restartWin, tgl('hardware_accel'), 'gpu'),
+        row('Redémarrer Ferrox', 'Vos onglets sont conservés.', h('button', { class: 'btn2 ghost', onclick: () => send({ cmd: 'restart' }) }, 'Redémarrer'), 'restart')),
+        S.restart_needed ? h('div', { class: 'restart' }, h('span', {}, 'Certains changements prendront effet au prochain démarrage.'), h('button', { class: 'btn2', onclick: () => send({ cmd: 'restart' }) }, 'Redémarrer maintenant')) : ''),
       sec('raccourcis', 'Raccourcis clavier', h('div', { class: 'pg-card' }, ...shortcuts.map(([k, d]) => row(d, '', h('span', { class: 'kbd' }, k), k)))),
+      sec('reset', 'Réinitialiser', h('div', { class: 'pg-card' },
+        row('Rétablir les paramètres par défaut', 'Thème, recherche, confidentialité, performances… Vos extensions et données ne sont pas touchées.', resetBtn(), 'reset défaut'))),
       sec('apropos', 'À propos de Ferrox', h('div', { class: 'pg-card' },
         row('Version', '', h('span', { class: 'pill live' }, 'Ferrox ' + S.about.version), 'version'),
         row('Moteur de rendu', 'Fourni par le système : aucun Chromium embarqué.', h('span', { class: 'mono' }, S.about.engine), 'moteur'),
@@ -837,11 +934,29 @@ body.noram #ram { display: none; }
     } else {
       card.append(h('div', { class: 'ext-install' }, inp,
         h('button', { class: 'btn2', onclick: go, ...(busy ? { disabled: '' } : {}) }, 'Installer'),
-        h('button', { class: 'btn2 ghost', title: 'Ouvrir le Chrome Web Store dans un nouvel onglet', onclick: () => { send({ cmd: 'new_tab', private: false }); setTimeout(() => send({ cmd: 'navigate', input: 'https://chromewebstore.google.com/category/extensions' }), 120); } }, icon(ICON.store))));
+        h('button', { class: 'btn2 ghost', title: 'Ouvrir le Chrome Web Store dans un nouvel onglet', onclick: () => send({ cmd: 'open_url', url: 'https://chromewebstore.google.com/category/extensions' }) }, icon(ICON.store))));
       if (S.ext_status) card.append(h('div', { class: 'ext-status' }, busy ? h('span', { class: 'spin' }) : '', S.ext_status.msg));
     }
     main.append(h('section', { class: 'pg-sec' }, h('h4', {}, 'Ajouter depuis le Chrome Web Store'), card));
 
+    if (S.ext_supported) {
+      const REC = [
+        ['ddkjiahejlhfcafbddmgiahcphecmpfh', 'uBlock Origin Lite', 'Bloqueur de pubs et traqueurs (par l\'auteur d\'uBlock Origin)', 'uB', '#800000', true],
+        ['eimadpbcbfnmbkopoojfekhnkhdbieeh', 'Dark Reader', 'Mode sombre pour tous les sites', 'DR', '#1f2937'],
+        ['nngceckbapebfimnlniiiahkandclblb', 'Bitwarden', 'Gestionnaire de mots de passe open source', 'Bw', '#175ddc'],
+        ['mnjggcdmjocbbbhaepdhchncahnbgone', 'SponsorBlock', 'Saute les sponsors des vidéos YouTube', 'SB', '#e0281d'],
+        ['gebbhagfogifgggkldgodflihgfeippi', 'Return YouTube Dislike', 'Réaffiche les « Je n\'aime pas » sur YouTube', 'RD', '#cc0000'],
+        ['pkehgijcmpdhfbdbbnkijodmdjhbjlgp', 'Privacy Badger', 'Bloque les traqueurs invisibles (EFF)', 'PB', '#ec9329'],
+      ];
+      const rg = h('div', { class: 'rec-grid' });
+      for (const [id, name, desc, lt, col, star] of REC) {
+        const have = S.exts.some((e) => e.id === id);
+        rg.append(h('div', { class: 'rec' }, h('div', { class: 'lt', style: 'background:' + col }, lt),
+          h('div', { class: 'nm' }, h('b', {}, name, star ? h('span', { class: 'tag' }, 'CONSEILLÉ') : ''), h('small', {}, desc)),
+          have ? h('span', { class: 'ok' }, '✔ Installée') : h('button', { class: 'btn2', ...(busy ? { disabled: '' } : {}), onclick: () => send({ cmd: 'ext_install', input: id }) }, 'Installer')));
+      }
+      main.append(h('section', { class: 'pg-sec' }, h('h4', {}, 'Extensions recommandées'), h('div', { class: 'pg-card' }, rg)));
+    }
     const grid = h('div', { class: 'ext-grid' });
     S.exts.forEach((e, i) => {
       let armed = false;
@@ -861,7 +976,7 @@ body.noram #ram { display: none; }
     });
     main.append(h('section', { class: 'pg-sec' }, h('h4', {}, 'Extensions installées', h('span', { class: 'pill' }, S.exts.length)),
       S.exts.length ? grid : h('div', { class: 'pg-card' }, h('div', { class: 'empty' }, icon(ICON.puzzle), 'Aucune extension pour l\'instant'))),
-      h('div', { class: 'note' }, 'Les extensions s\'exécutent dans le moteur WebView2 d\'Edge, qui ne prend en charge qu\'une partie des API Chrome. Les bloqueurs (uBlock Origin Lite…), les thèmes sombres et les gestionnaires de mots de passe fonctionnent généralement. Le bouton « Ouvrir » affiche la fenêtre de l\'extension dans un onglet.'));
+      h('div', { class: 'note' }, 'Les extensions s\'exécutent dans le moteur WebView2 d\'Edge, qui ne prend en charge qu\'une partie des API Chrome. Les bloqueurs (uBlock Origin Lite…), les thèmes sombres et les gestionnaires de mots de passe fonctionnent généralement. « Ouvrir » affiche la fenêtre de l\'extension sous le bouton Extensions ; Échap ou un clic ailleurs la ferme. uBlock Origin « classique » (Manifest V2) n\'est plus accepté par le moteur d\'Edge : utilisez uBlock Origin Lite, du même auteur.'));
   }
 
   let pageSig = '', lastPage = null;
@@ -870,7 +985,7 @@ body.noram #ram { display: none; }
     document.documentElement.style.setProperty('--pr', S.panel ? `calc(var(--border) + var(--panel))` : 'var(--border)');
     pg.classList.toggle('show', !!cur);
     if (!cur) { lastPage = null; pageSig = ''; return; }
-    const sig = JSON.stringify([cur, S.settings, S.exts, S.ext_status, S.blocklist, S.about, cur === 'settings' ? S.blocked_total : 0]);
+    const sig = JSON.stringify([cur, S.settings, S.exts, S.ext_status, S.blocklist, S.about, S.restart_needed, cur === 'settings' ? S.blocked_total : 0]);
     const ae = document.activeElement, typing = ae && pg.contains(ae) && ae.matches('input:not([type=range]):not([type=color])');
     if (sig === pageSig || closeOpenDD || (typing && cur === lastPage && ae.id !== 'pgq')) return;
     const scroller = pg.querySelector('.pg-scroll'), scroll = scroller ? scroller.scrollTop : 0;
@@ -968,15 +1083,33 @@ body.noram #ram { display: none; }
   $('#titlebar').addEventListener('dblclick', (e) => { if (isDragZone(e.target)) send({ cmd: 'maximize' }); });
 
   addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && closeOpenDD) closeOpenDD();
-    if (!e.ctrlKey) return;
     const k = e.key.toLowerCase();
-    if (k === 't' && !e.shiftKey) { e.preventDefault(); send({ cmd: 'new_tab', private: false }); }
-    if (k === 'n' && e.shiftKey) { e.preventDefault(); send({ cmd: 'new_tab', private: true }); }
-    if (k === 'l') { e.preventDefault(); fx.focusUrl(); }
-    if (k === 'r') { e.preventDefault(); rl.click(); }
-    if (k === 'w') { e.preventDefault(); const t = S && S.tabs.find((x) => x.active); if (t) send({ cmd: 'close', id: t.id }); }
+    if (k === 'escape') {
+      if (closeOpenDD) { closeOpenDD(); return; }
+      if (S && S.panel) { send({ cmd: 'panel', name: S.panel }); return; }
+      send({ cmd: 'key', k: 'esc' }); return;
+    }
+    let c = null;
+    if (e.ctrlKey && !e.altKey) {
+      if (k === 'l') { e.preventDefault(); fx.focusUrl(); return; }
+      if (k === 'r') { e.preventDefault(); rl.click(); return; }
+      if (k === 'tab') c = e.shiftKey ? 'prev' : 'next';
+      else if (e.shiftKey && k === 't') c = 'T';
+      else if (e.shiftKey && k === 'n') c = 'n';
+      else if (!e.shiftKey && (k === 't' || k === 'w')) c = k;
+      else if (!e.shiftKey && /^[1-9]$/.test(k)) c = k;
+      else if (k === '+' || k === '=') c = 'zin';
+      else if (k === '-') c = 'zout';
+      else if (k === '0') c = 'z0';
+    } else if (e.altKey && k === 'arrowleft') c = 'back';
+    else if (e.altKey && k === 'arrowright') c = 'fwd';
+    else if (k === 'f5') { e.preventDefault(); rl.click(); return; }
+    else if (k === 'f11') c = 'f11';
+    if (c && !(e.target.matches && e.target.matches('input') && ['zin', 'zout', 'z0'].includes(c))) { e.preventDefault(); send({ cmd: 'key', k: c }); }
   });
+  // Un clic n'importe où dans l'interface ferme la fenêtre d'extension.
+  addEventListener('mousedown', (e) => { if (S && S.popup && !e.target.closest('[data-panel="extensions"], .pext, .ext .ft')) send({ cmd: 'close_popup' }); }, true);
+  $('#zoomb').onclick = () => send({ cmd: 'zoom', delta: 0 });
   addEventListener('contextmenu', (e) => { if (!e.target.matches('input')) e.preventDefault(); });
   send({ cmd: 'ready' });
 })();

@@ -80,6 +80,9 @@ enum UserEvent {
     ExtAdded(Result<String, String>),
     ExtList(Vec<(String, String, bool)>),
     ExtChanged(Option<String>, bool),
+    Favicon(u64, String),
+    Fullscreen(u64, bool),
+    ClosePopup,
 }
 
 /// Commandes envoyées par l'interface (JSON). Tout champ inattendu est rejeté.
@@ -110,6 +113,13 @@ enum UiCmd {
     ExtRemove { id: String },
     ExtEnable { id: String, on: bool },
     ExtOpen { id: String, page: String },
+    OpenUrl { url: String },
+    ClosePopup,
+    Key { k: String },
+    Zoom { delta: i32 },
+    Restart,
+    ResetSettings,
+    OpenDownloads,
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +135,10 @@ struct Tab {
     private: bool,
     loading: bool,
     blocked: u32,
+    favicon: Option<String>,
+    zoom: u32,
+    can_back: bool,
+    can_fwd: bool,
 }
 
 /// Drapeaux partagés avec les callbacks des WebViews (qui doivent être 'static).
@@ -136,6 +150,7 @@ struct Shared {
     https_only: Arc<AtomicBool>,
     block_perms: Arc<AtomicBool>,
     http_allowed: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    download_dir: Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
 }
 
 struct App {
@@ -160,6 +175,16 @@ struct App {
     ext_status: Option<(bool, String)>,
     /// Rayon des coins arrondis par Windows 11 (0 ailleurs).
     corner_radius: u32,
+    /// Onglets fermés récemment (Ctrl+Maj+T).
+    closed: Vec<String>,
+    /// Plein écran (vidéo ou F11) : le contenu occupe toute la fenêtre.
+    fullscreen: bool,
+    /// Fenêtre d'extension affichée sous le bouton Extensions (Windows).
+    popup: Option<WebView>,
+    /// Réglages lus au démarrage qui exigent un redémarrage pour changer.
+    boot_flags: (bool, bool),
+    session_dirty: bool,
+    ubo_checked: bool,
 }
 
 fn main() {
@@ -173,6 +198,9 @@ fn main() {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let settings = Settings::load();
+    let settings_boot = settings.clone();
+    // Arguments du moteur (identiques pour toutes les vues, fixés au démarrage).
+    let _ = BROWSER_ARGS.set(browser_args(&settings));
 
     let window = WindowBuilder::new()
         .with_title("Ferrox")
@@ -243,6 +271,7 @@ fn main() {
         https_only: Arc::new(AtomicBool::new(settings.https_only)),
         block_perms: Arc::new(AtomicBool::new(settings.block_permissions)),
         http_allowed: Default::default(),
+        download_dir: Arc::new(std::sync::Mutex::new(download_dir_of(&settings))),
     };
 
     let mut app = App {
@@ -264,6 +293,12 @@ fn main() {
         exts: Vec::new(),
         ext_status: None,
         corner_radius: 0,
+        closed: Vec::new(),
+        fullscreen: false,
+        popup: None,
+        boot_flags: (settings_boot.allow_autoplay, settings_boot.hardware_accel),
+        session_dirty: false,
+        ubo_checked: false,
         notice: None,
     };
 
@@ -276,17 +311,42 @@ fn main() {
         winstyle::border_color(&app.window, &app.settings.accent);
     }
 
+    if app.settings.clear_on_exit {
+        // Filet de sécurité : si l'effacement à la fermeture n'a pas eu le temps de finir.
+        let _ = app.ui.clear_all_browsing_data();
+    }
+    #[cfg(target_os = "windows")]
+    extensions::wv2::set_autofill(&app.ui, app.settings.autofill, app.settings.save_passwords);
+
     let start = std::env::args().nth(1).map(|a| app.resolve_input(&a));
-    app.new_tab(start.as_deref().unwrap_or(HOME_URL).to_string(), false);
+    let session = config::Session::load();
+    if let Some(url) = start {
+        app.new_tab(url, false);
+    } else if app.settings.restore_session && !session.tabs.is_empty() {
+        // Les onglets restaurés restent « endormis » jusqu'à ce qu'on les ouvre : démarrage instantané.
+        for url in session.tabs.iter().take(100) {
+            let url = if url == HOME_URL || internal_page(url).is_some() || url.starts_with("https://") || url.starts_with("http://") {
+                url.clone()
+            } else {
+                continue;
+            };
+            app.push_tab(url, false);
+        }
+        let idx = session.active.min(app.tabs.len().saturating_sub(1));
+        match app.tabs.get(idx).map(|t| t.id) {
+            Some(id) => app.switch(id),
+            None => app.new_tab(HOME_URL.into(), false),
+        }
+    } else {
+        let home = app.resolve_input(&app.settings.home_url.clone());
+        app.new_tab(home, false);
+    }
 
     let mut next_tick = Instant::now() + TICK;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(next_tick);
         match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                app.settings.save();
-                *control_flow = ControlFlow::Exit;
-            }
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => app.quit(),
             Event::WindowEvent { event: WindowEvent::Resized(_), .. } => app.layout(),
             Event::UserEvent(ev) => app.on_event(ev),
             Event::NewEvents(tao::event::StartCause::ResumeTimeReached { .. }) => {
@@ -362,7 +422,7 @@ fn build(
         // arguments identiques. On garde SmartScreen (anti-phishing) actif, que wry
         // désactive par défaut, et on coupe la télémétrie / les pings.
         builder
-            .with_additional_browser_args(WEBVIEW2_ARGS)
+            .with_additional_browser_args(BROWSER_ARGS.get().map(String::as_str).unwrap_or(WEBVIEW2_ARGS))
             .with_browser_extensions_enabled(true)
             .build_as_child(window)
     }
@@ -372,7 +432,25 @@ fn build(
     }
 }
 
-#[cfg(target_os = "windows")]
+static BROWSER_ARGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Arguments du moteur WebView2 selon les réglages (lecture auto, GPU).
+fn browser_args(s: &Settings) -> String {
+    let mut a = String::from(WEBVIEW2_ARGS);
+    if s.allow_autoplay {
+        a.push_str(" --autoplay-policy=no-user-gesture-required");
+    }
+    if !s.hardware_accel {
+        a.push_str(" --disable-gpu --disable-gpu-compositing");
+    }
+    a
+}
+
+fn download_dir_of(s: &Settings) -> Option<std::path::PathBuf> {
+    if s.download_dir.is_empty() { dirs::download_dir() } else { Some(s.download_dir.clone().into()) }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const WEBVIEW2_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msEdgeShoppingAssistant,\
 AutofillServerCommunication,msEdgeCollections --no-pings --disable-domain-reliability";
 
@@ -428,6 +506,11 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
+fn is_shortcut(k: &str) -> bool {
+    matches!(k, "t" | "w" | "l" | "r" | "n" | "T" | "next" | "prev" | "back" | "fwd" | "zin" | "zout" | "z0" | "f11" | "esc")
+        || (k.len() == 1 && (b'1'..=b'9').contains(&k.as_bytes()[0]))
+}
+
 fn tab_title(url: &str) -> String {
     match url {
         HOME_URL => "Nouvel onglet".into(),
@@ -445,6 +528,9 @@ impl App {
     // ------------------------------------------------------------------ layout
     fn content_rect(&self) -> Rect {
         let (w, h) = logical_size(&self.window);
+        if self.fullscreen {
+            return Rect { position: LogicalPosition::new(0, 0).into(), size: WLogicalSize::new(w, h).into() };
+        }
         let b = if self.window.is_maximized() { 0 } else { BORDER };
         let panel = if self.panel.is_some() { PANEL_W } else { 0 };
         Rect {
@@ -458,6 +544,7 @@ impl App {
     }
 
     fn layout(&mut self) {
+        self.close_popup();
         let _ = self.ui.set_bounds(full_rect(&self.window));
         let r = self.content_rect();
         for t in &self.tabs {
@@ -520,8 +607,24 @@ impl App {
     }
 
     fn new_tab(&mut self, url: String, private: bool) {
+        let id = self.push_tab(url, private);
+        if self.settings.new_tab_next {
+            // Place l'onglet juste après l'onglet actif.
+            if let (Some(a), Some(last)) = (self.active_idx(), self.tabs.len().checked_sub(1)) {
+                if a + 1 < last {
+                    let t = self.tabs.remove(last);
+                    self.tabs.insert(a + 1, t);
+                }
+            }
+        }
+        self.switch(id);
+    }
+
+    /// Ajoute un onglet (non chargé) en fin de liste et renvoie son id.
+    fn push_tab(&mut self, url: String, private: bool) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
+        self.session_dirty = true;
         self.tabs.push(Tab {
             id,
             title: tab_title(&url),
@@ -531,8 +634,12 @@ impl App {
             private,
             loading: false,
             blocked: 0,
+            favicon: None,
+            zoom: self.settings.default_zoom,
+            can_back: false,
+            can_fwd: false,
         });
-        self.switch(id);
+        id
     }
 
     fn create_webview(&mut self, idx: usize) {
@@ -548,6 +655,7 @@ impl App {
         let rect = self.content_rect();
         let home = (url == HOME_URL).then(|| self.home_html());
         let adblock = self.settings.adblock;
+        let zoom = self.tabs[idx].zoom;
 
         let mut builder = if private {
             // Même environnement (exigé par WebView2), mais session InPrivate éphémère.
@@ -559,7 +667,7 @@ impl App {
         if adblock {
             builder = builder.with_initialization_script(sh.script.as_str());
         }
-        builder = builder.with_initialization_script(PRIVACY_SCRIPT);
+        builder = builder.with_initialization_script(PRIVACY_SCRIPT.replace("__DNT__", if self.settings.send_dnt { "true" } else { "false" }));
 
         let nav = {
             let (sh, p) = (sh.clone(), p.clone());
@@ -597,7 +705,8 @@ impl App {
             .with_bounds(rect)
             .with_background_color((18, 16, 25, 255))
             .with_devtools(cfg!(debug_assertions))
-            .with_autoplay(false)
+            .with_autoplay(self.settings.allow_autoplay)
+            .with_general_autofill_enabled(self.settings.autofill)
             .with_clipboard(true)
             .with_background_throttling(BackgroundThrottlingPolicy::Suspend)
             .with_navigation_handler(nav)
@@ -638,27 +747,35 @@ impl App {
                 let p = p.clone();
                 move |req| {
                     let b = req.body();
-                    if b.len() > 16 {
+                    if b.len() > 1024 {
                         return;
                     }
                     if let Some(n) = b.strip_prefix("b:").and_then(|n| n.parse::<u32>().ok()) {
                         let _ = p.send_event(UserEvent::Blocked(id, n.min(100_000)));
                     } else if let Some(k) = b.strip_prefix("k:") {
-                        if matches!(k, "t" | "w" | "l" | "r" | "n" | "next" | "prev") {
+                        if is_shortcut(k) {
                             let _ = p.send_event(UserEvent::Key(id, k.to_string()));
                         }
+                    } else if let Some(u) = b.strip_prefix("f:") {
+                        // Icône du site : HTTPS uniquement, caractères sûrs uniquement.
+                        if u.starts_with("https://") && !u.contains(['"', '\\', '<', '>', ' ', '\n']) {
+                            let _ = p.send_event(UserEvent::Favicon(id, u.to_string()));
+                        }
+                    } else if b == "x" {
+                        let _ = p.send_event(UserEvent::ClosePopup);
                     }
                 }
             })
             .with_download_started_handler({
                 let p = p.clone();
+                let dl_dir = sh.download_dir.clone();
                 move |url, path| {
                     let name = path
                         .file_name()
                         .map(|n| n.to_string_lossy().replace(['/', '\\'], "_"))
                         .filter(|n| !n.is_empty() && n != "." && n != "..")
                         .unwrap_or_else(|| "telechargement".into());
-                    if let Some(dir) = dirs::download_dir() {
+                    if let Some(dir) = dl_dir.lock().ok().and_then(|d| d.clone()) {
                         *path = dir.join(name);
                     }
                     let _ = p.send_event(UserEvent::Download(url, false));
@@ -681,7 +798,12 @@ impl App {
         };
 
         #[cfg(target_os = "linux")]
-        harden_linux(&wv, &self.settings);
+        harden_linux(&wv, &self.settings, { let p = p.clone(); move |on| { let _ = p.send_event(UserEvent::Fullscreen(id, on)); } });
+        #[cfg(target_os = "windows")]
+        extensions::wv2::on_fullscreen(&wv, { let p = p.clone(); move |on| { let _ = p.send_event(UserEvent::Fullscreen(id, on)); } });
+        if zoom != 100 {
+            let _ = wv.zoom(zoom as f64 / 100.0);
+        }
 
         if url != HOME_URL {
             let _ = wv.load_url(&url);
@@ -691,10 +813,19 @@ impl App {
 
     fn switch(&mut self, id: u64) {
         let Some(idx) = self.idx(id) else { return };
+        if self.active != Some(id) {
+            self.close_popup();
+            self.set_fullscreen(false);
+            self.session_dirty = true;
+        }
         self.active = Some(id);
         self.notice = None;
         if self.tabs[idx].wv.is_none() {
             self.create_webview(idx);
+        }
+        if internal_page(&self.tabs[idx].url).is_some() {
+            // Page interne : c'est l'interface qui affiche la page et reçoit le clavier.
+            let _ = self.ui.focus();
         }
         let r = self.content_rect();
         for t in &mut self.tabs {
@@ -715,12 +846,22 @@ impl App {
 
     fn close(&mut self, id: u64) {
         let Some(idx) = self.idx(id) else { return };
+        if self.tabs.len() == 1 && self.settings.quit_on_last_tab {
+            // Dernier onglet fermé → on quitte (la session garde cet onglet).
+            self.quit();
+        }
         let tab = self.tabs.remove(idx);
+        self.session_dirty = true;
+        if !tab.private && tab.url != HOME_URL {
+            self.closed.push(tab.url.clone());
+            if self.closed.len() > 25 {
+                self.closed.remove(0);
+            }
+        }
         drop(tab.wv); // détruit la WebView et libère la mémoire
         if self.tabs.is_empty() {
-            // Dernier onglet fermé → on quitte le navigateur.
-            self.settings.save();
-            std::process::exit(0);
+            self.new_tab(HOME_URL.into(), false);
+            return;
         }
         if self.active == Some(id) {
             let ni = idx.min(self.tabs.len() - 1);
@@ -834,9 +975,17 @@ impl App {
                     t.loading = started;
                     if started {
                         t.blocked = 0;
+                        if blocker::host_of(&url) != blocker::host_of(&t.url) {
+                            t.favicon = None;
+                        }
                     }
-                    if url.starts_with("http") {
+                    if url.starts_with("http") || url.starts_with("chrome-extension://") {
                         t.url = url;
+                        self.session_dirty = true;
+                    }
+                    if let Some(wv) = &t.wv {
+                        t.can_back = wv.can_go_back().unwrap_or(false);
+                        t.can_fwd = wv.can_go_forward().unwrap_or(false);
                     }
                     self.push_state();
                 }
@@ -893,6 +1042,17 @@ impl App {
                     })
                     .collect();
                 self.exts.sort_by_key(|e| e.name.to_lowercase());
+                if !self.ubo_checked {
+                    self.ubo_checked = true;
+                    if !self.settings.ubo_offered {
+                        // 1er lancement : installe uBlock Origin Lite (une seule fois, même si on la supprime ensuite).
+                        self.settings.ubo_offered = true;
+                        self.settings.save();
+                        if !self.exts.iter().any(|e| e.id == extensions::UBOL_ID) {
+                            self.ext_install(extensions::UBOL_ID);
+                        }
+                    }
+                }
                 self.push_state();
             }
             UserEvent::ExtChanged(removed, ok) => {
@@ -910,27 +1070,175 @@ impl App {
                 self.push_state();
             }
             UserEvent::Key(id, k) => {
-                if self.active != Some(id) {
-                    return;
-                }
-                match k.as_str() {
-                    "t" => self.new_tab(HOME_URL.into(), false),
-                    "n" => self.new_tab(HOME_URL.into(), true),
-                    "w" => self.close(id),
-                    "r" => {
-                        if let Some(wv) = self.active_wv() {
-                            let _ = wv.reload();
-                        }
-                    }
-                    "l" => {
-                        let _ = self.ui.focus();
-                        let _ = self.ui.evaluate_script("window.fx && fx.focusUrl()");
-                    }
-                    "next" | "prev" => self.cycle(k == "next"),
-                    _ => {}
+                if self.active == Some(id) {
+                    self.shortcut(&k);
                 }
             }
+            UserEvent::Favicon(id, url) => {
+                if let Some(i) = self.idx(id) {
+                    if self.tabs[i].favicon.as_deref() != Some(url.as_str()) {
+                        self.tabs[i].favicon = Some(url);
+                        self.push_state();
+                    }
+                }
+            }
+            UserEvent::Fullscreen(id, on) => {
+                if self.active == Some(id) {
+                    self.set_fullscreen(on);
+                }
+            }
+            UserEvent::ClosePopup => self.close_popup(),
         }
+    }
+
+    fn active_id(&self) -> Option<u64> {
+        self.active
+    }
+
+    /// Raccourcis clavier (venant de l'interface ou des pages).
+    fn shortcut(&mut self, k: &str) {
+        match k {
+            "t" => self.new_tab(HOME_URL.into(), false),
+            "n" => self.new_tab(HOME_URL.into(), true),
+            "w" => {
+                if let Some(id) = self.active_id() {
+                    self.close(id);
+                }
+            }
+            "T" => {
+                if let Some(url) = self.closed.pop() {
+                    self.new_tab(url, false);
+                }
+            }
+            "r" => {
+                if let Some(wv) = self.active_wv() {
+                    let _ = wv.reload();
+                }
+            }
+            "back" => {
+                if let Some(wv) = self.active_wv() {
+                    let _ = wv.go_back();
+                }
+            }
+            "fwd" => {
+                if let Some(wv) = self.active_wv() {
+                    let _ = wv.go_forward();
+                }
+            }
+            "l" => {
+                let _ = self.ui.focus();
+                let _ = self.ui.evaluate_script("window.fx && fx.focusUrl()");
+            }
+            "next" | "prev" => self.cycle(k == "next"),
+            "zin" => self.zoom(10),
+            "zout" => self.zoom(-10),
+            "z0" => self.zoom(0),
+            "f11" => {
+                let on = !self.fullscreen;
+                self.set_fullscreen(on);
+            }
+            "esc" => {
+                if self.fullscreen {
+                    self.set_fullscreen(false);
+                }
+                self.close_popup();
+            }
+            d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() && d != "0" => {
+                // Ctrl+1…8 : onglet n ; Ctrl+9 : dernier onglet.
+                let n = (d.as_bytes()[0] - b'1') as usize;
+                let idx = if n == 8 { self.tabs.len() - 1 } else { n };
+                if let Some(t) = self.tabs.get(idx) {
+                    let id = t.id;
+                    self.switch(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn zoom(&mut self, delta: i32) {
+        let Some(i) = self.active_idx() else { return };
+        let z = if delta == 0 { 100 } else { (self.tabs[i].zoom as i32 + delta).clamp(30, 300) as u32 };
+        self.tabs[i].zoom = z;
+        if let Some(wv) = &self.tabs[i].wv {
+            let _ = wv.zoom(z as f64 / 100.0);
+        }
+        self.push_state();
+    }
+
+    fn set_fullscreen(&mut self, on: bool) {
+        if self.fullscreen == on {
+            return;
+        }
+        self.fullscreen = on;
+        self.window.set_fullscreen(on.then_some(tao::window::Fullscreen::Borderless(None)));
+        self.layout();
+        self.push_state();
+    }
+
+    fn close_popup(&mut self) {
+        if self.popup.take().is_some() {
+            self.push_state();
+        }
+    }
+
+    /// Ouvre la fenêtre (popup) d'une extension sous le bouton Extensions.
+    fn open_ext_popup(&mut self, url: String) {
+        self.close_popup();
+        let (w, _) = logical_size(&self.window);
+        let pw = 380u32;
+        let right = if self.panel.is_some() { PANEL_W } else { 0 } + BORDER + 8;
+        let rect = Rect {
+            position: LogicalPosition::new(w.saturating_sub(pw + right), TOP_H + 6).into(),
+            size: WLogicalSize::new(pw, 560).into(),
+        };
+        let p = self.proxy.clone();
+        let p2 = self.proxy.clone();
+        let builder = WebViewBuilder::new_with_web_context(&mut self.ctx)
+            .with_bounds(rect)
+            .with_background_color((24, 24, 27, 255))
+            .with_devtools(cfg!(debug_assertions))
+            .with_url(url)
+            // Les liens ouverts depuis la popup vont dans un nouvel onglet.
+            .with_navigation_handler(move |u| {
+                if u.starts_with("chrome-extension://") || u.starts_with("about:") {
+                    return true;
+                }
+                if u.starts_with("https://") || u.starts_with("http://") {
+                    let _ = p.send_event(UserEvent::OpenTab(u));
+                    let _ = p.send_event(UserEvent::ClosePopup);
+                }
+                false
+            })
+            .with_new_window_req_handler(move |u, _| {
+                if u.starts_with("https://") || u.starts_with("http://") || u.starts_with("chrome-extension://") {
+                    let _ = p2.send_event(UserEvent::OpenTab(u));
+                }
+                NewWindowResponse::Deny
+            });
+        if let Ok(wv) = build(builder, &self.window, #[cfg(target_os = "linux")] &self.fixed) {
+            let _ = wv.focus();
+            self.popup = Some(wv);
+        }
+        self.push_state();
+    }
+
+    fn save_session(&mut self) {
+        let tabs: Vec<&Tab> = self.tabs.iter().filter(|t| !t.private).collect();
+        let active = tabs.iter().position(|t| Some(t.id) == self.active).unwrap_or(0);
+        config::Session { tabs: tabs.iter().map(|t| t.url.clone()).collect(), active }.save();
+        self.session_dirty = false;
+    }
+
+    fn quit(&mut self) -> ! {
+        self.settings.save();
+        self.save_session();
+        if self.settings.clear_on_exit {
+            let _ = self.ui.clear_all_browsing_data();
+            // laisse un court délai au moteur pour effacer (sinon : refait au prochain démarrage)
+            std::thread::sleep(Duration::from_millis(400));
+        }
+        std::process::exit(0)
     }
 
     fn cycle(&mut self, forward: bool) {
@@ -962,14 +1270,42 @@ impl App {
                     }
                 }
             }
-            UiCmd::Back => {
-                if let Some(wv) = self.active_wv() {
-                    let _ = wv.go_back();
+            UiCmd::Back => self.shortcut("back"),
+            UiCmd::Forward => self.shortcut("fwd"),
+            UiCmd::Key { k } => {
+                if is_shortcut(&k) {
+                    self.shortcut(&k);
                 }
             }
-            UiCmd::Forward => {
-                if let Some(wv) = self.active_wv() {
-                    let _ = wv.go_forward();
+            UiCmd::Zoom { delta } => self.zoom(delta.clamp(-50, 50)),
+            UiCmd::ClosePopup => self.close_popup(),
+            UiCmd::OpenUrl { url } => {
+                if url.starts_with("https://") {
+                    self.new_tab(url, false);
+                }
+            }
+            UiCmd::Restart => {
+                self.settings.save();
+                self.save_session();
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).spawn();
+                }
+                std::process::exit(0);
+            }
+            UiCmd::ResetSettings => {
+                let ubo = self.settings.ubo_offered;
+                self.settings = Settings { ubo_offered: ubo, ..Settings::default() };
+                self.apply_settings();
+            }
+            UiCmd::OpenDownloads => {
+                if let Some(dir) = download_dir_of(&self.settings) {
+                    let _ = std::fs::create_dir_all(&dir);
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                    #[cfg(target_os = "linux")]
+                    let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&dir).spawn();
                 }
             }
             UiCmd::Reload => {
@@ -985,15 +1321,10 @@ impl App {
                 self.push_state();
             }
             UiCmd::Settings { settings } => {
-                self.settings = settings.sanitized();
-                #[cfg(target_os = "windows")]
-                winstyle::border_color(&self.window, &self.settings.accent);
-                self.shared.adblock.store(self.settings.adblock, Ordering::Relaxed);
-                self.shared.https_only.store(self.settings.https_only, Ordering::Relaxed);
-                self.shared.block_perms.store(self.settings.block_permissions, Ordering::Relaxed);
-                self.settings.save();
-                self.enforce_limits();
-                self.push_state();
+                // Le drapeau interne n'est jamais modifiable depuis l'interface.
+                let ubo = self.settings.ubo_offered;
+                self.settings = Settings { ubo_offered: ubo, ..settings }.sanitized();
+                self.apply_settings();
             }
             UiCmd::AllowHttp { url } => {
                 if let Some(host) = blocker::host_of(&url) {
@@ -1014,10 +1345,7 @@ impl App {
                 self.layout();
                 self.push_state();
             }
-            UiCmd::Quit => {
-                self.settings.save();
-                std::process::exit(0);
-            }
+            UiCmd::Quit => self.quit(),
             UiCmd::Resize { dir } => {
                 use tao::window::ResizeDirection as D;
                 let d = match dir.as_str() {
@@ -1054,7 +1382,8 @@ impl App {
                     _ => None,
                 });
                 if let Some(rel) = target {
-                    self.new_tab(format!("chrome-extension://{id}/{rel}"), false);
+                    let url = format!("chrome-extension://{id}/{rel}");
+                    if page == "popup" { self.open_ext_popup(url) } else { self.new_tab(url, false) }
                 }
             }
             UiCmd::ClearData => {
@@ -1067,6 +1396,23 @@ impl App {
     }
 
     // ------------------------------------------------------------- extensions
+    fn apply_settings(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            winstyle::border_color(&self.window, &self.settings.accent);
+            extensions::wv2::set_autofill(&self.ui, self.settings.autofill, self.settings.save_passwords);
+        }
+        self.shared.adblock.store(self.settings.adblock, Ordering::Relaxed);
+        self.shared.https_only.store(self.settings.https_only, Ordering::Relaxed);
+        self.shared.block_perms.store(self.settings.block_permissions, Ordering::Relaxed);
+        if let Ok(mut d) = self.shared.download_dir.lock() {
+            *d = download_dir_of(&self.settings);
+        }
+        self.settings.save();
+        self.enforce_limits();
+        self.push_state();
+    }
+
     fn ext_set_status(&mut self, busy: bool, msg: String) {
         self.ext_status = Some((busy, msg));
         self.push_state();
@@ -1140,6 +1486,9 @@ impl App {
     }
 
     fn tick(&mut self) {
+        if self.session_dirty && self.settings.restore_session {
+            self.save_session();
+        }
         self.usage = self.monitor.sample();
         self.enforce_limits();
         self.push_state();
@@ -1153,13 +1502,17 @@ impl App {
                 serde_json::json!({
                     "id": t.id,
                     "title": t.title,
-                    "url": if t.url == HOME_URL || internal_page(&t.url).is_some() { "" } else { t.url.as_str() },
+                    "url": if t.url == HOME_URL { "" } else { t.url.as_str() },
                     "page": internal_page(&t.url),
                     "active": Some(t.id) == self.active,
                     "loading": t.loading,
                     "sleeping": t.wv.is_none() && internal_page(&t.url).is_none(),
                     "private": t.private,
                     "blocked": t.blocked,
+                    "favicon": t.favicon,
+                    "zoom": t.zoom,
+                    "can_back": t.can_back,
+                    "can_fwd": t.can_fwd,
                 })
             })
             .collect();
@@ -1179,6 +1532,11 @@ impl App {
             },
             "maximized": self.window.is_maximized(),
             "exts": self.exts,
+            "fullscreen": self.fullscreen,
+            "popup": self.popup.is_some(),
+            "closed": self.closed.len(),
+            "restart_needed": (self.settings.allow_autoplay, self.settings.hardware_accel) != self.boot_flags
+                && cfg!(target_os = "windows"),
             "ext_supported": extensions::SUPPORTED,
             "ext_status": self.ext_status.as_ref().map(|(busy, msg)| serde_json::json!({"busy": busy, "msg": msg})),
             "about": {
@@ -1195,11 +1553,18 @@ impl App {
 
 /// Réglages WebKitGTK supplémentaires (Linux).
 #[cfg(target_os = "linux")]
-fn harden_linux(wv: &WebView, s: &Settings) {
-    use webkit2gtk::{CacheModel, SettingsExt, WebContextExt, WebViewExt, WebsiteDataManagerExt};
+fn harden_linux(wv: &WebView, s: &Settings, fullscreen: impl Fn(bool) + Clone + 'static) {
+    use webkit2gtk::{CacheModel, HardwareAccelerationPolicy, SettingsExt, WebContextExt, WebViewExt, WebsiteDataManagerExt};
     use wry::WebViewExtUnix;
     let wk = wv.webview();
+    // Vidéo en plein écran : Ferrox agrandit la vue à toute la fenêtre.
+    let f2 = fullscreen.clone();
+    wk.connect_enter_fullscreen(move |_| { fullscreen(true); false });
+    wk.connect_leave_fullscreen(move |_| { f2(false); false });
     if let Some(st) = WebViewExt::settings(&wk) {
+        if !s.hardware_accel {
+            st.set_hardware_acceleration_policy(HardwareAccelerationPolicy::Never);
+        }
         st.set_enable_dns_prefetching(false);
         st.set_javascript_can_open_windows_automatically(false);
         st.set_enable_page_cache(false); // économise la RAM
@@ -1220,18 +1585,38 @@ fn harden_linux(wv: &WebView, s: &Settings) {
 
 /// Signaux de vie privée + raccourcis clavier relayés depuis les pages.
 const PRIVACY_SCRIPT: &str = r#"(() => {
-  try { Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get: () => true, configurable: true }); } catch (_) {}
-  try { Object.defineProperty(Navigator.prototype, 'doNotTrack', { get: () => '1', configurable: true }); } catch (_) {}
+  if (__DNT__) {
+    try { Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get: () => true, configurable: true }); } catch (_) {}
+    try { Object.defineProperty(Navigator.prototype, 'doNotTrack', { get: () => '1', configurable: true }); } catch (_) {}
+  }
   if (window.top !== window) return;
+  const send = (m) => { try { window.ipc && window.ipc.postMessage(m); } catch (_) {} };
   addEventListener('keydown', (e) => {
-    if (!e.ctrlKey || e.altKey || e.metaKey) return;
     const k = e.key.toLowerCase();
     let c = null;
-    if (k === 'tab') c = e.shiftKey ? 'prev' : 'next';
-    else if (!e.shiftKey && ['t','w','l','r'].includes(k)) c = k;
-    else if (e.shiftKey && k === 'n') c = 'n';
-    if (c && window.ipc) { e.preventDefault(); e.stopPropagation(); window.ipc.postMessage('k:' + c); }
+    if (e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (k === 'tab') c = e.shiftKey ? 'prev' : 'next';
+      else if (e.shiftKey && k === 't') c = 'T';
+      else if (e.shiftKey && k === 'n') c = 'n';
+      else if (!e.shiftKey && ['t', 'w', 'l', 'r'].includes(k)) c = k;
+      else if (!e.shiftKey && /^[1-9]$/.test(k)) c = k;
+      else if (k === '+' || k === '=') c = 'zin';
+      else if (k === '-') c = 'zout';
+      else if (k === '0') c = 'z0';
+    } else if (e.altKey && !e.ctrlKey && k === 'arrowleft') c = 'back';
+    else if (e.altKey && !e.ctrlKey && k === 'arrowright') c = 'fwd';
+    else if (k === 'f5' && !e.ctrlKey) c = 'r';
+    else if (k === 'f11') c = 'f11';
+    else if (k === 'escape' && !document.fullscreenElement) { send('k:esc'); return; }
+    if (c) { e.preventDefault(); e.stopPropagation(); send('k:' + c); }
   }, true);
+  addEventListener('mousedown', () => send('x'), true);
+  const icon = () => {
+    const l = document.querySelector('link[rel~="icon"][href], link[rel="shortcut icon"][href], link[rel="apple-touch-icon"][href]');
+    let u = l ? l.href : (location.protocol === 'https:' ? location.origin + '/favicon.ico' : '');
+    if (u && u.startsWith('https://') && u.length < 1000) send('f:' + u);
+  };
+  if (document.readyState === 'complete') icon(); else addEventListener('load', icon);
 })();"#;
 
 #[cfg(test)]

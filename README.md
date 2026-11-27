@@ -15,7 +15,15 @@ Le binaire release fait environ **1,2 Mo**.
 
 ### Raccourcis
 
-`Ctrl+T` nouvel onglet · `Ctrl+Maj+N` onglet privé · `Ctrl+W` fermer · `Ctrl+L` barre d'adresse · `Ctrl+R` recharger · `Ctrl+Tab` onglet suivant · clic molette pour fermer un onglet.
+`Ctrl+T` nouvel onglet · `Ctrl+Maj+N` onglet privé · `Ctrl+W` fermer · `Ctrl+Maj+T` rouvrir l'onglet fermé · `Ctrl+Tab` / `Ctrl+Maj+Tab` onglet suivant / précédent · `Ctrl+1…9` aller à l'onglet n · `Ctrl+L` barre d'adresse · `Ctrl+R` / `F5` recharger · `Alt+←/→` précédent / suivant · `Ctrl +/-/0` zoom · `F11` plein écran · `Échap` quitter le plein écran ou fermer un menu · clic molette pour fermer un onglet.
+
+### Paramètres (`ferrox://settings`)
+
+Apparence (6 thèmes, couleur d'accent, animations, RAM, fond animé) · moteur de recherche · page d'accueil et **restauration de session** · confidentialité (bloqueur, HTTPS uniquement, permissions, anti-empreinte, Ne pas me pister, effacement à la fermeture) · performances (limiteur de RAM, veille) · onglets (position, fermeture au dernier onglet, zoom par défaut) · saisie automatique et mots de passe · lecture automatique des vidéos · dossier de téléchargement · accélération matérielle · redémarrage · réinitialisation.
+
+### uBlock Origin
+
+Au premier lancement sous Windows, Ferrox installe automatiquement **uBlock Origin Lite** depuis le Chrome Web Store. uBlock Origin « classique » (Manifest V2) n'est plus accepté par le moteur d'Edge (WebView2). La version Lite (Manifest V3) est faite par le même auteur. D'autres extensions recommandées s'installent en un clic depuis la page *Extensions*.
 
 ## Pourquoi c'est léger
 

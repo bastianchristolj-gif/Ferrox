@@ -18,6 +18,10 @@ const MAX_FILES: usize = 10_000;
 
 pub const SUPPORTED: bool = cfg!(target_os = "windows");
 
+/// uBlock Origin Lite (Manifest V3, par l'auteur d'uBlock Origin).
+/// uBlock Origin « classique » (Manifest V2) n'est plus accepté par le moteur d'Edge / WebView2.
+pub const UBOL_ID: &str = "ddkjiahejlhfcafbddmgiahcphecmpfh";
+
 pub fn ext_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -278,6 +282,34 @@ pub mod wv2 {
 
     fn profile(wv: &wry::WebView) -> windows_core::Result<ICoreWebView2Profile7> {
         unsafe { wv.webview().cast::<ICoreWebView2_13>()?.Profile()?.cast::<ICoreWebView2Profile7>() }
+    }
+
+    /// Saisie automatique et enregistrement des mots de passe (réglages du profil).
+    pub fn set_autofill(wv: &wry::WebView, autofill: bool, passwords: bool) {
+        unsafe {
+            if let Ok(p) = wv.webview().cast::<ICoreWebView2_13>().and_then(|w| w.Profile()).and_then(|p| p.cast::<ICoreWebView2Profile6>()) {
+                let _ = p.SetIsGeneralAutofillEnabled(autofill);
+                let _ = p.SetIsPasswordAutosaveEnabled(passwords);
+            }
+        }
+    }
+
+    /// Vidéo en plein écran : prévient quand la page entre / sort du plein écran.
+    pub fn on_fullscreen(wv: &wry::WebView, cb: impl Fn(bool) + 'static) {
+        let handler = webview2_com::ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
+            if let Some(s) = sender {
+                let mut b = BOOL::default();
+                unsafe {
+                    let _ = s.ContainsFullScreenElement(&mut b);
+                }
+                cb(b.as_bool());
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        unsafe {
+            let _ = wv.webview().add_ContainsFullScreenElementChanged(&handler, &mut token);
+        }
     }
 
     fn ext_id(e: &ICoreWebView2BrowserExtension) -> String {
