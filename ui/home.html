@@ -12,27 +12,28 @@ html, body { height: 100%; }
 body { background: radial-gradient(ellipse 90% 60% at 50% 115%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 62%),
     radial-gradient(ellipse 50% 40% at 85% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%), #0d0d10;
   color: #f2f2f5; font: 14px "Segoe UI Variable Text", "Segoe UI", "Inter", "Cantarell", system-ui, sans-serif; overflow-x: hidden; user-select: none; }
-.grid { position: fixed; inset: 0; pointer-events: none;
-  background-image: linear-gradient(#ffffff08 1px, transparent 1px), linear-gradient(90deg, #ffffff08 1px, transparent 1px); background-size: 52px 52px;
-  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 55%, #000 10%, transparent 75%); mask-image: radial-gradient(ellipse 70% 60% at 50% 55%, #000 10%, transparent 75%);
-}
+.grid { position: fixed; inset: 0; pointer-events: none; contain: strict;
+  background-image: linear-gradient(#ffffff08 1px, transparent 1px), linear-gradient(90deg, #ffffff08 1px, transparent 1px); background-size: 52px 52px; }
+/* fondu de la grille : un dégradé posé dessus (bien moins coûteux qu'un masque) */
+.grid::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 70% 60% at 50% 55%, transparent 10%, #0d0d10 75%); }
 body.nowall .grid { display: none; }
 main { position: relative; width: min(880px, 92vw); margin: 0 auto; padding: 9vh 0 60px; display: flex; flex-direction: column; align-items: center; }
 
 /* Horloge */
 .clock { font-size: 84px; font-weight: 200; letter-spacing: 2px; line-height: 1; font-variant-numeric: tabular-nums;
   background: linear-gradient(180deg, #fff 30%, color-mix(in srgb, var(--accent) 70%, #fff)); -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 0 26px var(--glow)); }
+  text-shadow: none; }
+.clock-wrap { position: relative; }
 .date { margin-top: 10px; color: var(--dim); font-size: 14px; letter-spacing: .4px; }
 .date b { color: #f2f2f5; font-weight: 600; }
 
 /* Recherche */
 form { width: min(640px, 100%); display: flex; align-items: center; height: 54px; margin-top: 34px; padding-left: 18px;
-  background: #141418cc; border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(8px);
+  background: #141418; border: 1px solid var(--line); border-radius: 14px;
   transition: border-color .25s, box-shadow .3s var(--ease); }
-form:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent), 0 12px 40px -12px var(--glow); }
+form:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 form svg { width: 18px; height: 18px; color: var(--dim); flex: none; }
-form input { flex: 1; height: 100%; background: none; border: 0; outline: 0; color: inherit; font: inherit; font-size: 16px; padding: 0 14px; user-select: text; }
+form input { will-change: contents; contain: paint; flex: 1; height: 100%; background: none; border: 0; outline: 0; color: inherit; font: inherit; font-size: 16px; padding: 0 14px; user-select: text; }
 form input::placeholder { color: #75757f; }
 form button { width: 46px; height: 42px; margin-right: 6px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; display: grid; place-items: center;
   transition: filter .2s, transform .15s; }
@@ -77,7 +78,7 @@ form button svg { color: #fff; transition: transform .3s var(--spring); } form:f
 .chip small { color: var(--dim); font-size: 11px; flex: none; }
 
 /* Fenêtre d'ajout */
-.modal { position: fixed; inset: 0; background: #000a; display: none; place-items: center; z-index: 10; backdrop-filter: blur(3px); }
+.modal { position: fixed; inset: 0; background: #000c; display: none; place-items: center; z-index: 10; }
 .modal.show { display: grid; animation: fade .2s; }
 .box { width: min(400px, 92vw); padding: 22px; border-radius: 16px; background: #18181c; border: 1px solid var(--line); box-shadow: 0 30px 80px -20px #000;
   animation: pop .35s var(--spring); }

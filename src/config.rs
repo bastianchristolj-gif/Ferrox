@@ -73,6 +73,10 @@ pub struct Settings {
     pub allow_autoplay: bool,
     /// Accélération matérielle (GPU).
     pub hardware_accel: bool,
+    /// Suspend les onglets cachés depuis 30 s (sauf s'ils jouent du son).
+    pub suspend_bg: bool,
+    /// Mode économie : moins de processus et rendu allégé (redémarrage requis).
+    pub eco_mode: bool,
     /// Dossier de téléchargement ("" = dossier système).
     pub download_dir: String,
 
@@ -124,6 +128,8 @@ impl Default for Settings {
             default_zoom: 100,
             allow_autoplay: false,
             hardware_accel: true,
+            suspend_bg: true,
+            eco_mode: false,
             download_dir: String::new(),
             autofill: true,
             save_passwords: true,

@@ -117,12 +117,12 @@ body.noglide .tab.active { background: var(--accent-dk); }
   background: var(--field); border: 1px solid var(--line); border-radius: 8px;
   transition: border-color .2s, box-shadow .25s var(--ease), background .2s; }
 #urlbox:hover { border-color: #3c3c44; }
-#urlbox:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 0 18px -6px var(--accent); }
+#urlbox:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 #lock { color: #3ddc97; display: grid; place-items: center; flex: none; transition: color .2s, opacity .2s; }
 #lock.insecure { color: #ffb020; }
 #lock svg { width: 14px; height: 14px; }
 .urlwrap { flex: 1; min-width: 0; height: 100%; position: relative; display: flex; align-items: center; }
-#url { width: 100%; height: 100%; background: none; border: 0; outline: 0; color: var(--text); font: inherit; font-size: 13.5px; user-select: text; }
+#url { contain: paint; width: 100%; height: 100%; background: none; border: 0; outline: 0; color: var(--text); font: inherit; font-size: 13.5px; user-select: text; }
 #url::placeholder { color: #85858e; }
 #urlview { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); pointer-events: none;
   font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
@@ -168,7 +168,7 @@ body.noglide .tab.active { background: var(--accent-dk); }
 .ring svg { width: 66px; height: 66px; transform: rotate(-90deg); }
 .ring circle { stroke-width: 6; fill: none; }
 .ring .bgc { stroke: var(--line); }
-.ring .fg { stroke: var(--accent); transition: stroke-dashoffset .9s var(--ease), stroke .3s; filter: drop-shadow(0 0 3px var(--accent-glow)); }
+.ring .fg { stroke: var(--accent); transition: stroke-dashoffset .5s var(--ease), stroke .3s; }
 .ring b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 13px; font-variant-numeric: tabular-nums; }
 .gauge .lbl { font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
 .gauge .val { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -390,7 +390,8 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
 
 /* ---------- Control : vraies données ---------- */
 .sysbar { height: 8px; border-radius: 4px; background: #2a2a30; overflow: hidden; display: flex; margin: 8px 0 6px; }
-.sysbar i { display: block; height: 100%; transition: width .9s var(--ease); }
+.sysbar { position: relative; display: block; }
+.sysbar i { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: left; transform: scaleX(0); transition: transform .5s var(--ease); }
 .sysbar .ferrox { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 .sysbar .other { background: #5b5b66; }
 .legend { display: flex; gap: 12px; font-size: 10.5px; color: var(--dim); flex-wrap: wrap; }
@@ -405,7 +406,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
 .cat .mb { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 .cat .mb small { color: var(--dim); font-weight: 500; margin-left: 6px; }
 .cat .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: #2a2a30; overflow: hidden; }
-.cat .bar i { display: block; height: 100%; border-radius: 2px; background: var(--c, var(--accent)); transition: width .9s var(--ease); }
+.cat .bar i { display: block; width: 100%; height: 100%; border-radius: 2px; background: var(--c, var(--accent)); transform-origin: left; transform: scaleX(0); transition: transform .5s var(--ease); }
 .trow { display: flex; align-items: center; gap: 9px; padding: 7px 0; font-size: 12px; }
 .trow + .trow { border-top: 1px solid var(--line); }
 .trow .fi { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--dim); }
@@ -544,6 +545,10 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     for (const k of kids) if (k !== '' && k != null) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
     return e;
   };
+  // N'écrit dans la page que si la valeur change : chaque écriture coûte un redessin.
+  const setText = (el, t) => { t = String(t); if (el.textContent !== t) el.textContent = t; };
+  const setAttr = (el, k, v) => { v = String(v); if (el.getAttribute(k) !== v) el.setAttribute(k, v); };
+  const setStyle = (el, k, v) => { if (el.style.getPropertyValue(k) !== String(v)) el.style.setProperty(k, v); };
   const icon = (d) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24');
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.append(p); return s; };
   const ICON = {
@@ -591,8 +596,8 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     el.classList.toggle('active', t.active);
     el.classList.toggle('sleeping', t.sleeping);
     el.classList.toggle('private', t.private);
-    el.title = t.title + (t.sleeping ? ' (en veille)' : '');
-    el.children[1].textContent = t.title || 'Sans titre';
+    setAttr(el, 'title', t.title + (t.sleeping ? ' (en veille)' : ''));
+    setText(el.children[1], t.title || 'Sans titre');
     const key = t.page === 'settings' ? 'gear' : t.page === 'extensions' ? 'puzzle' : t.page === 'history' ? 'clock' : t.loading ? 'load' : t.sleeping ? 'moon' : t.private ? 'eye' : (t.favicon || (S.settings.site_icons && /^https?:/.test(t.url))) ? 'fav:' + (t.favicon || '') + t.url : 'globe';
     if (el._ic !== key) {
       el._ic = key;
@@ -612,10 +617,10 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     const act = [...tabEls.values()].find((el) => el.classList.contains('active'));
     if (!act) { glider.classList.remove('ready'); return; }
     if (instant || !animOn()) glider.style.transition = 'none';
-    glider.style.width = act.offsetWidth + 'px';
-    glider.style.transform = `translateX(${act.offsetLeft}px)`;
+    setStyle(glider, 'width', act.offsetWidth + 'px');
+    setStyle(glider, 'transform', `translateX(${act.offsetLeft}px)`);
     if (instant || !animOn()) { void glider.offsetWidth; glider.style.transition = ''; }
-    glider.classList.add('ready');
+    if (!glider.classList.contains('ready')) glider.classList.add('ready');
   }
   addEventListener('resize', () => placeGlider(true));
 
@@ -646,7 +651,7 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
       el.style.left = left + 'px'; el.style.width = w + 'px'; el.style.top = '4px';
       setTimeout(() => el.remove(), 230);
     }
-    box.append(newTabBtn);
+    if (box.lastChild !== newTabBtn) box.append(newTabBtn);
     // …puis on fait glisser chaque onglet depuis son ancienne position (GPU : transform).
     if (before.size) {
       const ease = 'cubic-bezier(.22, 1, .36, 1)';
@@ -683,18 +688,18 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     const internal = !!t.url && t.url.startsWith('ferrox://');
     lock.classList.toggle('int', internal);
     lock.classList.toggle('insecure', !!t.url && !internal && !t.url.startsWith('https://') && !t.url.startsWith('chrome-extension://'));
-    lock.style.opacity = t.url ? 1 : .35;
-    lock.title = t.url && t.url.startsWith('https://') ? 'Connexion chiffrée (HTTPS)' : 'Connexion non chiffrée';
+    setStyle(lock, 'opacity', t.url ? '1' : '0.35');
+    setAttr(lock, 'title', t.url && t.url.startsWith('https://') ? 'Connexion chiffrée (HTTPS)' : 'Connexion non chiffrée');
     const pb = $('#pageblocked'), nbk = t.blocked || 0;
-    pb.textContent = nbk ? (nbk > 99 ? '99+' : nbk) : '';
+    setText(pb, nbk ? (nbk > 99 ? '99+' : nbk) : '');
     if (nbk !== lastBlocked && nbk) { pb.classList.remove('pop'); void pb.offsetWidth; pb.classList.add('pop'); }
     lastBlocked = nbk;
-    $('#miniram').textContent = S.usage.ram || '–';
+    setText($('#miniram'), S.usage.ram || '–');
     $('#loadbar').classList.toggle('on', !!t.loading);
     $('#back').classList.toggle('dis', !t.can_back);
     $('#fwd').classList.toggle('dis', !t.can_fwd);
     const zb = $('#zoomb'), z = t.zoom || 100;
-    zb.classList.toggle('show', z !== 100); zb.textContent = z + ' %';
+    zb.classList.toggle('show', z !== 100); setText(zb, z + ' %');
     const wm = $('#wmax');
     if (wm._m !== !!S.maximized) {
       wm._m = !!S.maximized;
@@ -731,10 +736,12 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     wrap.innerHTML = `<svg viewBox="0 0 66 66"><circle class="bgc" cx="33" cy="33" r="27"/><circle class="fg" cx="33" cy="33" r="27" stroke-dasharray="${C}" stroke-dashoffset="${C}"/></svg>`;
     const label = h('b', {}, '0%');
     wrap.append(label);
+    const fg = wrap.querySelector('.fg');
     live[name] = { set(pct, text) {
-      const v = Math.max(0, Math.min(1, pct));
-      wrap.querySelector('.fg').style.strokeDashoffset = C * (1 - v);
-      label.textContent = text;
+      // n'écrit dans la page que si la valeur affichée change (évite de redessiner)
+      const v = Math.round(Math.max(0, Math.min(1, pct)) * 100);
+      if (fg._v !== v) { fg._v = v; fg.style.strokeDashoffset = C * (1 - v / 100); }
+      if (label.textContent !== text) label.textContent = text;
     } };
     return wrap;
   }
@@ -867,7 +874,9 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         slider('ram_limit_mb', 'Limite de RAM', '', 256, 8192, 128, fmtMb),
         slider('max_live_tabs', 'Onglets actifs maximum', 'Les plus anciens passent en veille', 1, 20, 1, (v) => v),
         slider('hibernate_after_min', 'Veille après inactivité', '', 0, 60, 1, (v) => v ? v + ' min' : 'jamais')),
-      h('h3', {}, 'Onglets · ' + S.tabs.length), tabsCard);
+      h('h3', {}, 'Onglets · ' + S.tabs.length), tabsCard,
+      h('div', { class: 'card' }, h('small', { style: 'color:var(--dim);line-height:1.5;display:block' },
+        'Mémoire privée, mesurée comme le Gestionnaire des tâches. Celui-ci affiche Ferrox.exe (l\'interface) à part : les processus du moteur y sont rangés sous « Microsoft Edge WebView2 ».')));
   }
 
   // Valeurs qui changent toutes les 2 s : mises à jour sur place (pas de reconstruction).
@@ -875,21 +884,25 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
     const u = S.usage, ram = u.ram, lim = S.settings.ram_limit_mb;
     if (live.ram && live.ramVal && live.ramVal.isConnected) {
       live.ram.set(ram / lim, Math.round(100 * ram / lim) + '%');
-      live.ramVal.textContent = fmtMb(ram);
-      live.ramLim.textContent = 'limite ' + fmtMb(lim) + (u.sys_total ? ' · ' + (100 * ram / u.sys_total).toFixed(1).replace('.', ',') + ' % de la RAM' : '');
+      const setT = (el, t) => { if (el.textContent !== t) el.textContent = t; };
+      setT(live.ramVal, fmtMb(ram));
+      setT(live.ramLim, 'limite ' + fmtMb(lim) + (u.sys_total ? ' · ' + (100 * ram / u.sys_total).toFixed(1).replace('.', ',') + ' % de la RAM' : ''));
       live.cpu.set(u.cpu / 100, Math.round(u.cpu) + '%');
-      live.cpuVal.textContent = u.cpu.toFixed(1).replace('.', ',') + ' %'; live.procs.textContent = u.procs + ' processus';
+      setT(live.cpuVal, u.cpu.toFixed(1).replace('.', ',') + ' %'); setT(live.procs, u.procs + ' processus');
       if (u.sys_total) {
         const other = Math.max(0, u.sys_used - ram);
-        live.sysF.style.width = (100 * ram / u.sys_total) + '%';
-        live.sysO.style.width = (100 * other / u.sys_total) + '%';
-        live.legend.replaceChildren(
+        const fF = ram / u.sys_total, fO = other / u.sys_total;
+        live.sysF.style.transform = `scaleX(${fF})`;
+        live.sysO.style.transform = `translateX(${fF * 100}%) scaleX(${fO})`;
+        live.sysO.style.transformOrigin = 'left';
+        const lk = [ram, other, u.sys_total - u.sys_used].map(Math.round).join();
+        if (live.legend._k !== lk) live.legend._k = lk, live.legend.replaceChildren(
           h('span', { style: '--c:var(--accent)' }, 'Ferrox ' + fmtMb(ram)),
           h('span', { style: '--c:#5b5b66' }, 'Autres applis ' + fmtMb(other)),
           h('span', { style: '--c:#2a2a30' }, 'Libre ' + fmtMb(Math.max(0, u.sys_total - u.sys_used)) + ' / ' + fmtMb(u.sys_total)));
       }
       const open = S.tabs.length, sleeping = S.tabs.filter((t) => t.sleeping).length;
-      live.stats.replaceChildren(
+      if (live.stats._k !== open + '/' + sleeping) live.stats._k = open + '/' + sleeping, live.stats.replaceChildren(
         h('div', { class: 'stat' }, h('b', {}, open), h('small', {}, 'Onglets')),
         h('div', { class: 'stat' }, h('b', {}, open - sleeping), h('small', {}, 'En mémoire')),
         h('div', { class: 'stat' }, h('b', {}, sleeping), h('small', {}, 'En veille')));
@@ -904,17 +917,23 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
           r.el = h('div', { class: 'cat', style: '--c:' + (CAT_COLORS[c.key] || 'var(--accent)') }, r.nm, r.mb, h('div', { class: 'bar' }, r.bar));
           live.catRows.set(c.key, r); live.cats.append(r.el);
         }
-        r.nm.replaceChildren(c.label, h('small', {}, c.procs + ' proc.'));
-        r.mb.replaceChildren(fmtMb(c.ram_mb), h('small', {}, c.cpu.toFixed(1).replace('.', ',') + ' %'));
-        r.bar.style.width = (100 * c.ram_mb / max) + '%';
+        const k = c.procs + '|' + Math.round(c.ram_mb) + '|' + c.cpu.toFixed(1);
+        if (r._k !== k) {
+          r._k = k;
+          r.nm.replaceChildren(c.label, h('small', {}, c.procs + ' proc.'));
+          r.mb.replaceChildren(fmtMb(c.ram_mb), h('small', {}, c.cpu.toFixed(1).replace('.', ',') + ' %'));
+        }
+        const sc = (c.ram_mb / max).toFixed(3);
+        if (r._s !== sc) { r._s = sc; r.bar.style.transform = `scaleX(${sc})`; }
       }
       for (const [k, r] of live.catRows) if (!seen.has(k)) { r.el.remove(); live.catRows.delete(k); }
       // mémoire par onglet
       for (const t of S.tabs) {
         const el = live.tmem && live.tmem.get(t.id); if (!el) continue;
-        el.textContent = t.page ? '' : t.sleeping ? '0 Mo' : (u.per_tab ? (t.mem != null ? fmtMb(t.mem) + (t.shared ? '*' : '') : '…') : 'actif');
-        el.title = t.shared ? 'Processus partagé avec d\'autres onglets du même site : mémoire répartie' : '';
-        el.style.color = t.sleeping ? 'var(--dim)' : '';
+        const txt = t.page ? '' : t.sleeping ? '0 Mo' : (u.per_tab ? (t.mem != null ? fmtMb(t.mem) + (t.shared ? '*' : '') : '…') : 'actif') + (t.suspended ? ' ⏸' : '');
+        if (el.textContent !== txt) el.textContent = txt;
+        setAttr(el, 'title', t.suspended ? 'Onglet suspendu : scripts gelés, il reprend dès que vous l\'ouvrez' : t.shared ? 'Processus partagé avec d\'autres onglets du même site : mémoire répartie' : '');
+        setStyle(el, 'color', t.sleeping ? 'var(--dim)' : '');
       }
     }
     if (live.blocked && live.blocked.isConnected) live.blocked.textContent = S.blocked_total.toLocaleString('fr-FR');
@@ -1185,7 +1204,10 @@ input[type=range]:active::-webkit-slider-thumb { transform: scale(1.3); }
         row('Limiteur de RAM', 'Met en veille les onglets en arrière-plan au-delà de la limite.', tgl('ram_limiter'), 'ram memoire'),
         row('Limite de RAM', '', rng('ram_limit_mb', 256, 8192, 128, (v) => v + ' Mo'), 'ram'),
         row('Onglets actifs maximum', 'Les plus anciens sont mis en veille.', rng('max_live_tabs', 1, 20, 1, (v) => v), 'onglets'),
-        row('Mise en veille après inactivité', '', rng('hibernate_after_min', 0, 60, 1, (v) => v ? v + ' min' : 'jamais'), 'veille'))),
+        row('Mise en veille après inactivité', '', rng('hibernate_after_min', 0, 60, 1, (v) => v ? v + ' min' : 'jamais'), 'veille'),
+        row('Suspendre les onglets en arrière-plan', 'Après 30 s sans être affiché, un onglet est gelé (0 % de processeur) et reprend instantanément à l\'ouverture. Les onglets qui jouent du son ne sont jamais suspendus.' + (S.ext_supported ? '' : ' Windows uniquement.'), tgl('suspend_bg'), 'cpu suspendre'),
+        row('Mode économie', 'Limite le nombre de processus de pages et allège le rendu. Pour les PC modestes. ' + (S.ext_supported ? 'Nécessite un redémarrage.' : 'Windows uniquement.'), tgl('eco_mode'), 'eco economie ram'),
+        S.restart_needed ? h('div', { class: 'restart' }, h('span', {}, 'Redémarrez Ferrox pour appliquer ce changement.'), h('button', { class: 'btn2', onclick: () => send({ cmd: 'restart' }) }, 'Redémarrer')) : '')),
       sec('onglets', 'Onglets', h('div', { class: 'pg-card' },
         row('Ouvrir les nouveaux onglets à côté de l\'onglet actif', '', tgl('new_tab_next'), 'position'),
         row('Fermer Ferrox avec le dernier onglet', 'Sinon, un onglet vide est ouvert.', tgl('quit_on_last_tab'), 'quitter'),

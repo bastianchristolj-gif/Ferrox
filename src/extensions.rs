@@ -312,6 +312,31 @@ pub mod wv2 {
         }
     }
 
+    /// Onglet visible → mémoire normale ; caché → le moteur libère ses caches.
+    pub fn set_background(wv: &wry::WebView, hidden: bool) {
+        let _ = wv.set_memory_usage_level(if hidden { wry::MemoryUsageLevel::Low } else { wry::MemoryUsageLevel::Normal });
+    }
+
+    /// Suspend un onglet caché (scripts et minuteurs gelés, mémoire réduite).
+    /// Renvoie `false` si l'onglet joue du son : on le laisse tourner (musique, vidéo…).
+    /// L'onglet reprend automatiquement dès qu'il redevient visible.
+    pub fn try_suspend(wv: &wry::WebView) -> bool {
+        let w = wv.webview();
+        unsafe {
+            if let Ok(w8) = w.cast::<ICoreWebView2_8>() {
+                let mut playing = BOOL::default();
+                if w8.IsDocumentPlayingAudio(&mut playing).is_ok() && playing.as_bool() {
+                    return false;
+                }
+            }
+            if let Ok(w3) = w.cast::<ICoreWebView2_3>() {
+                let h = webview2_com::TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(())));
+                let _ = w3.TrySuspend(&h);
+            }
+        }
+        true
+    }
+
     /// Icône officielle du site (fournie par le moteur).
     pub fn on_favicon(wv: &wry::WebView, cb: impl Fn(String) + 'static) {
         let Ok(w15) = wv.webview().cast::<ICoreWebView2_15>() else { return };

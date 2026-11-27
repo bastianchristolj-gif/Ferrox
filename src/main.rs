@@ -150,6 +150,8 @@ struct Tab {
     can_fwd: bool,
     /// Identifiant du cadre principal (Windows) pour mesurer la RAM de l'onglet.
     frame_id: Option<u32>,
+    /// Onglet suspendu par le moteur (Windows).
+    suspended: bool,
 }
 
 /// Drapeaux partagés avec les callbacks des WebViews (qui doivent être 'static).
@@ -193,12 +195,15 @@ struct App {
     /// Fenêtre d'extension affichée sous le bouton Extensions (Windows).
     popup: Option<WebView>,
     /// Réglages lus au démarrage qui exigent un redémarrage pour changer.
-    boot_flags: (bool, bool),
+    boot_flags: (bool, bool, bool),
     session_dirty: bool,
     ubo_checked: bool,
     history: history::History,
     /// Processus de rendu → cadres principaux (Windows).
     renderers: Vec<(u32, Vec<u32>)>,
+    focused: bool,
+    ticks: u32,
+    last_state: std::cell::RefCell<String>,
 }
 
 fn main() {
@@ -310,11 +315,14 @@ fn main() {
         closed: Vec::new(),
         fullscreen: false,
         popup: None,
-        boot_flags: (settings_boot.allow_autoplay, settings_boot.hardware_accel),
+        boot_flags: (settings_boot.allow_autoplay, settings_boot.hardware_accel, settings_boot.eco_mode),
         session_dirty: false,
         ubo_checked: false,
         history: history::History::load(),
         renderers: Vec::new(),
+        focused: true,
+        ticks: 0,
+        last_state: Default::default(),
         notice: None,
     };
 
@@ -364,6 +372,7 @@ fn main() {
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => app.quit(),
             Event::WindowEvent { event: WindowEvent::Resized(_), .. } => app.layout(),
+            Event::WindowEvent { event: WindowEvent::Focused(f), .. } => app.focused = f,
             Event::UserEvent(ev) => app.on_event(ev),
             Event::NewEvents(tao::event::StartCause::ResumeTimeReached { .. }) => {
                 next_tick = Instant::now() + TICK;
@@ -452,7 +461,11 @@ static BROWSER_ARGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Arguments du moteur WebView2 selon les réglages (lecture auto, GPU).
 fn browser_args(s: &Settings) -> String {
-    let mut a = String::from(WEBVIEW2_ARGS);
+    // Les onglets d'un même site partagent un processus : moins de RAM.
+    let mut a = format!("{WEBVIEW2_ARGS} --process-per-site");
+    if s.eco_mode {
+        a.push_str(" --renderer-process-limit=4 --enable-low-end-device-mode");
+    }
     if s.allow_autoplay {
         a.push_str(" --autoplay-policy=no-user-gesture-required");
     }
@@ -670,6 +683,7 @@ impl App {
             can_back: false,
             can_fwd: false,
             frame_id: None,
+            suspended: false,
         });
         id
     }
@@ -886,8 +900,13 @@ impl App {
                     let _ = wv.set_visible(true);
                     let _ = wv.focus();
                     t.last_active = Instant::now();
+                    t.suspended = false;
+                    #[cfg(target_os = "windows")]
+                    extensions::wv2::set_background(wv, false);
                 } else {
                     let _ = wv.set_visible(false);
+                    #[cfg(target_os = "windows")]
+                    extensions::wv2::set_background(wv, true);
                 }
             }
         }
@@ -1349,6 +1368,7 @@ impl App {
     fn on_ui(&mut self, cmd: UiCmd) {
         match cmd {
             UiCmd::Ready => {
+                self.last_state.borrow_mut().clear();
                 self.push_state();
                 self.ext_refresh();
             }
@@ -1607,12 +1627,29 @@ impl App {
     }
 
     fn tick(&mut self) {
+        self.ticks = self.ticks.wrapping_add(1);
         if self.session_dirty && self.settings.restore_session {
             self.save_session();
         }
+        // Fenêtre en arrière-plan ou réduite : mesures 3× moins fréquentes.
+        if !self.focused && self.ticks % 3 != 0 {
+            return;
+        }
+        // Suspension des onglets cachés depuis plus de 30 s.
+        #[cfg(target_os = "windows")]
+        if self.settings.suspend_bg {
+            let active = self.active;
+            for t in self.tabs.iter_mut() {
+                if Some(t.id) != active && !t.suspended && t.last_active.elapsed() > Duration::from_secs(30) {
+                    if let Some(wv) = &t.wv {
+                        t.suspended = extensions::wv2::try_suspend(wv);
+                    }
+                }
+            }
+        }
         self.usage = self.monitor.sample();
         #[cfg(target_os = "windows")]
-        {
+        if self.panel.as_deref() == Some("control") {
             let p = self.proxy.clone();
             extensions::wv2::renderer_frames(&self.ui, move |r| {
                 let _ = p.send_event(UserEvent::Renderers(r));
@@ -1662,6 +1699,7 @@ impl App {
                     "can_back": t.can_back,
                     "can_fwd": t.can_fwd,
                     "mem": mem,
+                    "suspended": t.suspended,
                     "shared": shared,
                 })
             })
@@ -1670,12 +1708,16 @@ impl App {
             "tabs": tabs,
             "panel": self.panel,
             "settings": self.settings,
-            "usage": {
+            // Panneau Control fermé : seule la RAM (arrondie à 5 Mo) est affichée → l'interface
+            // n'est redessinée que si ce chiffre change.
+            "usage": if self.panel.as_deref() != Some("control") {
+                serde_json::json!({"ram": self.usage.ram_mb / 5 * 5, "cpu": 0, "procs": 0, "sys_total": 0, "sys_used": 0, "cats": [], "per_tab": false})
+            } else { serde_json::json!({
                 "ram": self.usage.ram_mb, "cpu": self.usage.cpu_pct, "procs": self.usage.procs,
                 "sys_total": self.usage.sys_total_mb, "sys_used": self.usage.sys_used_mb,
                 "cats": self.usage.categories,
                 "per_tab": cfg!(target_os = "windows"),
-            },
+            }) },
             "history_count": self.history.len(),
             "blocked_total": self.blocked_total,
             "blocklist": self.shared.blocker.len(),
@@ -1691,7 +1733,7 @@ impl App {
             "fullscreen": self.fullscreen,
             "popup": self.popup.is_some(),
             "closed": self.closed.len(),
-            "restart_needed": (self.settings.allow_autoplay, self.settings.hardware_accel) != self.boot_flags
+            "restart_needed": (self.settings.allow_autoplay, self.settings.hardware_accel, self.settings.eco_mode) != self.boot_flags
                 && cfg!(target_os = "windows"),
             "ext_supported": extensions::SUPPORTED,
             "ext_status": self.ext_status.as_ref().map(|(busy, msg)| serde_json::json!({"busy": busy, "msg": msg})),
@@ -1703,7 +1745,13 @@ impl App {
             },
         });
         // serde_json produit un littéral JS sûr : aucune injection possible.
-        let _ = self.ui.evaluate_script(&format!("window.fx && fx.render({state})"));
+        let js = format!("window.fx && fx.render({state})");
+        // Rien n'a changé → on n'envoie rien (l'interface ne se redessine pas).
+        if *self.last_state.borrow() == js {
+            return;
+        }
+        let _ = self.ui.evaluate_script(&js);
+        *self.last_state.borrow_mut() = js;
     }
 }
 
