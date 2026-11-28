@@ -70,8 +70,11 @@ jobs:
 
           # Moteur Chromium : bibliothèques, ressources et langues (français + anglais).
           $cef = $boot.Directory.FullName
+          # Exclus : dxcompiler.dll (26 Mo, compilateur de shaders DirectX 12 réservé à WebGPU),
+          # archive.json (métadonnées du téléchargement) et les bibliothèques de compilation.
+          $skip = 'dxcompiler.dll', 'dxil.dll', 'archive.json'
           foreach ($f in Get-ChildItem $cef -File) {
-            if ($f.Extension -in '.dll', '.pak', '.bin', '.dat', '.json') { Copy-Item $f.FullName "$out/" }
+            if ($f.Extension -in '.dll', '.pak', '.bin', '.dat', '.json' -and $f.Name -notin $skip) { Copy-Item $f.FullName "$out/" }
           }
           foreach ($l in 'fr.pak', 'en-US.pak') {
             $p = Get-ChildItem -Recurse $cef, $rel -Filter $l -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -eq 'locales' } | Select-Object -First 1
@@ -93,6 +96,9 @@ jobs:
 
           & "C:\Program Files (x86)\NSIS\makensis.exe" -V2 "-DVERSION=$v" installer/ferrox.nsi
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          $mb = { param($b) '{0:N1} Mo' -f ($b / 1MB) }
+          Write-Output ("Taille du dossier installé : " + (& $mb ((Get-ChildItem -Recurse -File $out | Measure-Object Length -Sum).Sum)))
+          Write-Output ("Taille de l'installateur  : " + (& $mb (Get-Item "dist/Ferrox-Setup-$v.exe").Length))
           # Paquet de distribution : installateur + version portable + empreintes SHA-256
           $pkg = "dist/Ferrox-$v-windows"
           New-Item -ItemType Directory -Force "$pkg/Ferrox-portable" | Out-Null
@@ -108,10 +114,14 @@ jobs:
           Compress-Archive -Path $pkg -DestinationPath "dist/Ferrox-$v-windows.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: ferrox-windows-x64
-          path: |
-            dist/Ferrox-*-windows.zip
-            dist/Ferrox-Setup-*.exe
+          name: ferrox-setup-windows-x64
+          path: dist/Ferrox-Setup-*.exe
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrox-portable-windows-x64
+          path: dist/Ferrox-*-windows.zip
+          compression-level: 0
       - name: Publier la Release (si cette version n'est pas encore publiée)
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
