@@ -10,7 +10,11 @@
 ; =============================================================================
 
 Unicode true
-SetCompressor /SOLID lzma
+; LZMA « solide » avec un grand dictionnaire : le moteur Chromium (libcef.dll, ~300 Mo)
+; se compresse bien mieux qu'avec le dictionnaire par défaut (8 Mo).
+SetCompressor /SOLID /FINAL lzma
+SetCompressorDictSize 128
+SetDatablockOptimize on
 ManifestDPIAware true
 
 !ifndef VERSION
